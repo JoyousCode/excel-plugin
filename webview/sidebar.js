@@ -13,6 +13,8 @@
   let isUpdatingFromVSCode = false;
   let pendingUpdate = false;
   let isRenderingForm = false;
+  let headerRowIndex = 1;
+  let headerRowInputInitialized = false;
   
   // 初始化
   window.addEventListener('message', event => {
@@ -34,8 +36,83 @@
       case 'requestFormData':
         sendFormData();
         break;
+      case 'updateHeaders':
+        console.log('[Sidebar] 收到更新表头消息:', message.headers);
+        updateHeadersOnly(message.headers);
+        break;
     }
   });
+  
+  // 初始化表首行选择器
+  function initHeaderRowSelector() {
+    const headerRowInput = document.getElementById('headerRowInput');
+    if (headerRowInput && !headerRowInputInitialized) {
+      // 设置初始值
+      headerRowInput.value = headerRowIndex;
+      
+      console.log(`[Sidebar] 初始化表首行选择器: 值=${headerRowIndex}`);
+      
+      // 防抖定时器
+      let headerRowInputDebounceTimer = null;
+      
+      // 监听输入变化 - 使用input事件实现实时渲染
+      headerRowInput.addEventListener('input', function() {
+        const newValue = parseInt(this.value);
+        
+        // 清除之前的防抖定时器
+        if (headerRowInputDebounceTimer) {
+          clearTimeout(headerRowInputDebounceTimer);
+        }
+        
+        // 防抖处理，避免频繁触发
+        headerRowInputDebounceTimer = setTimeout(() => {
+          if (!isNaN(newValue) && newValue >= 1 && newValue <= rowCount) {
+            headerRowIndex = newValue;
+            console.log(`[Sidebar] 表首行设置为: ${headerRowIndex}`);
+            // 通知扩展表首行已变化，扩展会发送updateHeaders消息回来触发renderForm
+            vscode.postMessage({
+              type: 'headerRowChanged',
+              headerRowIndex: headerRowIndex
+            });
+          } else if (!isNaN(newValue)) {
+            console.log(`[Sidebar] 无效的表首行值: ${newValue}, 有效范围: 1-${rowCount}`);
+          }
+        }, 300); // 300ms防抖延迟
+      });
+      
+      headerRowInputInitialized = true;
+    }
+    
+    // 每次都更新最大值
+    updateHeaderRowSelectorMax();
+  }
+  
+  // 更新表首行选择器的最大值
+  function updateHeaderRowSelectorMax() {
+    const headerRowInput = document.getElementById('headerRowInput');
+    const totalRowCountSpan = document.getElementById('totalRowCount');
+    
+    if (headerRowInput) {
+      const newMax = rowCount > 0 ? rowCount : 1;
+      headerRowInput.max = newMax;
+      console.log(`[Sidebar] 更新表首行选择器最大值为: ${newMax}`);
+      
+      // 更新总行数显示
+      if (totalRowCountSpan) {
+        totalRowCountSpan.textContent = newMax.toString();
+        console.log(`[Sidebar] 更新总行数显示为: ${newMax}`);
+      }
+      
+      // 如果当前值超过新的最大值，调整当前值
+      if (headerRowIndex > newMax) {
+        headerRowIndex = newMax;
+        headerRowInput.value = newMax;
+        console.log(`[Sidebar] 表首行值调整为: ${headerRowIndex}`);
+      }
+    } else {
+      console.log(`[Sidebar] 表首行选择器元素未找到`);
+    }
+  }
   
   // 处理有数据的情况
   function handleData(data) {
@@ -55,6 +132,10 @@
     updateUI();
     if (isExtensionActive && headers.length > 0 && currentFile) {
       renderForm();
+      // 在表单渲染完成后初始化表首行选择器
+      setTimeout(() => {
+        initHeaderRowSelector();
+      }, 50);
     } else {
       showEmptyState();
     }
@@ -191,12 +272,65 @@
     }
   }
   
+  // 仅更新表头名称，不影响输入框的值
+  function updateHeadersOnly(newHeaders) {
+    const formFields = document.getElementById('formFields');
+    if (!formFields) return;
+    
+    console.log(`[Sidebar] 仅更新表头名称，新表头数量: ${newHeaders.length}`);
+    console.log(`[Sidebar] 当前行号: ${currentLineNumber}, 表首行: ${headerRowIndex}, 当前行索引: ${currentRowIndex}`);
+    
+    // 更新全局headers变量
+    headers = newHeaders;
+    
+    // 根据新的表首行位置重新计算currentRowIndex
+    const newRowIndex = currentLineNumber - headerRowIndex;
+    console.log(`[Sidebar] 根据新表首行重新计算行索引: ${newRowIndex}`);
+    
+    // 更新currentRowIndex
+    currentRowIndex = newRowIndex;
+    
+    // 遍历现有的表单项，只更新label中的表头名称和输入框的dataset.column属性
+    newHeaders.forEach((header, index) => {
+      const formGroup = document.getElementById(`form-group-${index}`);
+      if (formGroup) {
+        const label = formGroup.querySelector('label');
+        if (label) {
+          const headerSpan = label.querySelector('span:first-child');
+          if (headerSpan) {
+            headerSpan.textContent = header;
+          }
+        }
+        
+        const textarea = formGroup.querySelector('textarea');
+        if (textarea) {
+          textarea.dataset.column = header;
+          textarea.placeholder = `输入 ${header}`;
+        }
+      }
+    });
+    
+    console.log('[Sidebar] 表头名称更新完成，行索引已更新');
+  }
+  
   // 渲染表单
   function renderForm() {
     const formFields = document.getElementById('formFields');
     if (!formFields) return;
     
     isRenderingForm = true;
+    
+    // 保存当前表单数据（使用索引而不是header名称）
+    const currentFormData = {};
+    if (headers.length > 0) {
+      headers.forEach((header, index) => {
+        const textarea = document.getElementById(`input-${index}`);
+        if (textarea) {
+          currentFormData[index] = textarea.value;
+        }
+      });
+    }
+    
     formFields.innerHTML = '';
     
     if (headers.length === 0 || !isExtensionActive) {
@@ -204,7 +338,7 @@
       return;
     }
     
-    console.log(`[Sidebar] 渲染表单，表头数量: ${headers.length}`);
+    console.log(`[Sidebar] 渲染表单，表头数量: ${headers.length}, 表首行: ${headerRowIndex}`);
     
     headers.forEach((header, index) => {
       const formGroup = document.createElement('div');
@@ -257,12 +391,8 @@
           lastUpdateTime = now;
           
           // 更新对应单元格
-          if (currentRowIndex >= 0) {
-            console.log(`[Sidebar] 从表单更新单元格: 行${currentRowIndex}, 列"${header}", 值: "${this.value}"`);
-            updateCell(currentRowIndex, header, this.value);
-          } else {
-            console.log(`[Sidebar] 无法更新单元格: currentRowIndex=${currentRowIndex}`);
-          }
+          console.log(`[Sidebar] 从表单更新单元格: 行${currentRowIndex}, 列"${header}", 值: "${this.value}"`);
+          updateCell(currentRowIndex, header, this.value);
         }, 200);
       });
       
@@ -296,9 +426,21 @@
       formFields.appendChild(formGroup);
     });
     
-    // 表单渲染完成
+    // 表单渲染完成，恢复数据
     setTimeout(() => {
       isRenderingForm = false;
+      
+      // 恢复之前保存的数据（使用索引而不是header名称）
+      if (Object.keys(currentFormData).length > 0) {
+        headers.forEach((header, index) => {
+          const textarea = document.getElementById(`input-${index}`);
+          if (textarea && currentFormData[index] !== undefined) {
+            textarea.value = currentFormData[index];
+            autoResize(textarea);
+          }
+        });
+        console.log('[Sidebar] 表单渲染完成，已恢复数据');
+      }
     }, 10);
   }
   
@@ -333,20 +475,15 @@
     
     console.log(`[Sidebar] 选择行: 行索引${rowIndex}, 行号${lineNumber}, 数据:`, rowData);
     
-    // 检查是否是有效的数据行
-    if (rowIndex < 0) {
-      // 表头行或其他无效行，清空表单
-      console.log(`[Sidebar] 行索引无效，清空表单`);
-      clearForm();
-      return;
-    }
-    
     currentRowIndex = rowIndex;
     currentLineNumber = lineNumber;
     formData = { ...rowData };
     
     // 更新文件统计信息
     updateUI();
+    
+    // 更新表首行选择器的最大值
+    updateHeaderRowSelectorMax();
     
     // 清除所有未完成的更新
     Object.keys(updateTimeouts).forEach(key => {
@@ -397,6 +534,9 @@
     
     // 更新文件统计信息
     updateUI();
+    
+    // 更新表首行选择器的最大值
+    updateHeaderRowSelectorMax();
     
     // 标记为来自VSCode的更新
     isUpdatingFromVSCode = true;
@@ -468,7 +608,7 @@
     console.log(`[Sidebar] 发送更新单元格消息: 行${rowIndex}, 列"${column}", 值: "${value}"`);
     
     // 验证数据
-    if (rowIndex === undefined || rowIndex === null || rowIndex < 0) {
+    if (rowIndex === undefined || rowIndex === null) {
       console.error(`[Sidebar] 无效的行索引: ${rowIndex}`);
       return;
     }

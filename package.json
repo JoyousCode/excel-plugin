@@ -32,7 +32,7 @@
         {
           "id": "excel-plugin",
           "title": "ExcelPlugin",
-          "icon": "media/excel.svg"
+          "icon": "media/icon.png"
         }
       ]
     },
@@ -42,7 +42,7 @@
           "type": "webview",
           "id": "excelPlugin.sidebar",
           "name": "ExcelPlugin",
-          "icon": "media/icon.svg"
+          "icon": "media/icon.png"
         }
       ]
     },

@@ -330,6 +330,9 @@ export function activate(context: vscode.ExtensionContext) {
     
     const excelRowNumber = currentLine + 1;
     
+    // 获取表首行位置
+    const headerRowIndex = sidebarProvider.getHeaderRowIndex();
+    
     // 获取文档中的所有行
     const lines: string[] = [];
     for (let i = 0; i < editor.document.lineCount; i++) {
@@ -343,16 +346,63 @@ export function activate(context: vscode.ExtensionContext) {
       return;
     }
     
-    // 重新解析第一行作为表头
-    const firstLine = lines[0];
+    // 根据表首行位置解析表头
+    const headerLineIndex = headerRowIndex - 1; // 转换为0-based索引
+    
+    // 检查表首行索引是否在有效范围内
+    if (headerLineIndex < 0 || headerLineIndex >= lines.length) {
+      console.log(`表首行索引${headerLineIndex}超出范围，使用默认表头`);
+      const headers: string[] = ['Column 1'];
+      
+      if (currentExcelData) {
+        currentExcelData.headers = headers;
+      }
+      
+      const documentLineCount = editor.document.lineCount;
+      sidebarProvider.updateLineStats(documentLineCount, excelRowNumber);
+      
+      setTimeout(() => {
+        if (!sidebarProvider) {
+          return;
+        }
+        
+        if (currentLine >= 0 && currentLine < lines.length) {
+          const currentLineText = lines[currentLine];
+          let cells: string[] = [];
+          
+          if (currentLineText.includes('\t')) {
+            cells = currentLineText.split('\t');
+          } else if (currentLineText.includes(',')) {
+            cells = currentLineText.split(',');
+          } else {
+            cells = [currentLineText];
+          }
+          
+          const rowObject: any = {};
+          headers.forEach((header: string, index: number) => {
+            rowObject[header] = index < cells.length ? cells[index].trim() : '';
+          });
+          
+          const dataRowIndex = currentLine - headerRowIndex;
+          console.log(`更新表单显示第${dataRowIndex + 1}行:`, rowObject);
+          sidebarProvider.selectRow(rowObject, dataRowIndex, excelRowNumber, true);
+        } else {
+          console.log(`当前行超出文档范围: 行${excelRowNumber}，文档行数: ${lines.length}`);
+          sidebarProvider.selectRow({}, -1, excelRowNumber, true);
+        }
+      }, 50);
+      return;
+    }
+    
+    const headerLine = lines[headerLineIndex];
     let headers: string[] = [];
     
-    if (firstLine.includes('\t')) {
-      headers = firstLine.split('\t').map((header, index) => 
+    if (headerLine && headerLine.includes('\t')) {
+      headers = headerLine.split('\t').map((header, index) => 
         header.trim() || `Column ${index + 1}`
       );
-    } else if (firstLine.includes(',')) {
-      headers = firstLine.split(',').map((header, index) => 
+    } else if (headerLine && headerLine.includes(',')) {
+      headers = headerLine.split(',').map((header, index) => 
         header.trim() || `Column ${index + 1}`
       );
     } else {
@@ -374,14 +424,8 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
       
-      // 如果当前行是表头行，清空表单
-      if (currentLine === 0) {
-        const rowObject: any = {};
-        headers.forEach((header: string) => {
-          rowObject[header] = '';
-        });
-        sidebarProvider.selectRow(rowObject, -1, excelRowNumber, true);
-      } else if (currentLine > 0 && currentLine < lines.length) {
+      // 检查当前行是否在有效范围内
+      if (currentLine >= 0 && currentLine < lines.length) {
         // 有效数据行，直接从编辑器获取当前行的最新内容
         const currentLineText = lines[currentLine];
         let cells: string[];
@@ -401,14 +445,12 @@ export function activate(context: vscode.ExtensionContext) {
           rowObject[header] = index < cells.length ? cells[index].trim() : '';
         });
         
-        const dataRowIndex = currentLine - 1;
+        // 根据表首行位置计算数据行索引
+        const dataRowIndex = currentLine - headerRowIndex;
         console.log(`更新表单显示第${dataRowIndex + 1}行:`, rowObject);
+        
+        // 更新表单数据，无论dataRowIndex是否为负数都要填充数据
         sidebarProvider.selectRow(rowObject, dataRowIndex, excelRowNumber, true);
-      } else {
-        // 超出数据范围或无效行，但仍然需要更新当前行号
-        console.log(`当前行超出文档范围: 行${excelRowNumber}，文档行数: ${lines.length}`);
-        // 即使超出数据范围，也要确保侧边栏显示正确的行号
-        sidebarProvider.selectRow({}, -1, excelRowNumber, true);
       }
     }, 50);
   };
@@ -426,21 +468,28 @@ export function activate(context: vscode.ExtensionContext) {
       return;
     }
     
+    // 标记正在编辑表单，防止updateCurrentLineData覆盖表单数据
+    isEditingForm = true;
+    
     console.log(`[Extension] 开始更新单元格: 行${rowIndex + 1}, 列"${column}", 值: "${value}"`);
     
-    // Excel行号是行索引+2（表头行+1，行号从1开始）
-    const excelRowNumber = rowIndex + 2;
+    if (!sidebarProvider) {
+      console.warn('[Extension] 无法更新单元格: sidebarProvider未定义');
+      return;
+    }
+    
+    // rowIndex是相对于表首行的索引（0-based），headerRowIndex是表首行的行号（1-based）
+    // 编辑器行号（0-based）= rowIndex + headerRowIndex
+    const headerRowIndex = sidebarProvider.getHeaderRowIndex();
+    const lineNumber = rowIndex + headerRowIndex;
+    console.log(`[Extension] 编辑器行号: ${lineNumber + 1} (0-based: ${lineNumber}), rowIndex: ${rowIndex}, headerRowIndex: ${headerRowIndex}`);
     
     try {
       const editor = currentEditor;
       const document = editor.document;
       
-      // 获取要更新的行 - 直接基于编辑器实际行数判断，不依赖可能过时的内存数据
-      const lineNumber = excelRowNumber - 1; // 转换为编辑器行号（0-based）
-      console.log(`[Extension] 编辑器行号: ${lineNumber + 1} (0-based: ${lineNumber})`);
-      
       // 检查行是否存在于编辑器中
-      if (lineNumber < 1 || lineNumber >= document.lineCount) {
+      if (lineNumber < 0 || lineNumber >= document.lineCount) {
         console.warn(`[Extension] 行号 ${lineNumber + 1} 超出文档范围`);
         return;
       }
@@ -505,16 +554,21 @@ export function activate(context: vscode.ExtensionContext) {
       const success = await vscode.workspace.applyEdit(edit);
       
       if (success) {
-        console.log(`[Extension] ✅ 成功更新: 第${excelRowNumber}行 "${column}" = "${value}"`);
+        console.log(`[Extension] ✅ 成功更新: 第${lineNumber + 1}行 "${column}" = "${value}"`);
         
-        // 更新内存数据 - 确保更新内存中的行数据
-        currentExcelData.rows[rowIndex][columnIndex] = value;
-        
-        // 更新内存中的sheetData - 确保sheetData足够长
-        while (currentExcelData.sheetData.length <= rowIndex + 1) {
-          currentExcelData.sheetData.push(new Array(currentExcelData.headers.length).fill(''));
+        // 只有当rowIndex >= 0时才更新内存数据中的rows数组
+        // rowIndex为负数时，表示当前行在表首行之前，不需要更新内存数据
+        if (rowIndex >= 0) {
+          currentExcelData.rows[rowIndex][columnIndex] = value;
+          
+          // 更新内存中的sheetData - 确保sheetData足够长
+          while (currentExcelData.sheetData.length <= rowIndex + 1) {
+            currentExcelData.sheetData.push(new Array(currentExcelData.headers.length).fill(''));
+          }
+          currentExcelData.sheetData[rowIndex + 1][columnIndex] = value;
+        } else {
+          console.log(`[Extension] rowIndex为负数${rowIndex}，跳过内存数据更新，仅更新编辑器`);
         }
-        currentExcelData.sheetData[rowIndex + 1][columnIndex] = value;
         
         // 更新最后修改时间
         lastFormUpdateTime = Date.now();
@@ -522,23 +576,17 @@ export function activate(context: vscode.ExtensionContext) {
         console.error('[Extension] ❌ 应用编辑失败');
       }
       
-      // 重置标志
+      // 重置标志，延迟更长时间以确保编辑器更新完成
       setTimeout(() => {
         isEditorChangeFromExtension = false;
-      }, 100);
+        isEditingForm = false;
+      }, 500);
       
     } catch (error) {
       console.error('[Extension] ❌ 更新编辑器单元格失败:', error);
       isEditorChangeFromExtension = false;
-    }
-    
-    // 标记正在编辑表单
-    isEditingForm = true;
-    
-    // 2秒后重置编辑状态
-    setTimeout(() => {
       isEditingForm = false;
-    }, 2000);
+    }
   };
   
   // 处理编辑器内容变化
@@ -759,7 +807,61 @@ export function activate(context: vscode.ExtensionContext) {
   });
   
   // 创建侧边栏提供者
-  sidebarProvider = new ExcelSidebarProvider(context.extensionUri, isExtensionActive);
+  sidebarProvider = new ExcelSidebarProvider(context.extensionUri, isExtensionActive, (headerRowIndex) => {
+    // 表首行变化回调
+    console.log(`[Extension] 表首行变化回调: ${headerRowIndex}`);
+    
+    if (currentEditor && currentExcelFile) {
+      const editor = currentEditor;
+      const lines: string[] = [];
+      for (let i = 0; i < editor.document.lineCount; i++) {
+        lines.push(editor.document.lineAt(i).text);
+      }
+      
+      // 根据新的表首行位置解析表头
+      const headerLineIndex = headerRowIndex - 1;
+      let newHeaders: string[] = [];
+      
+      if (headerLineIndex >= 0 && headerLineIndex < lines.length) {
+        const headerLine = lines[headerLineIndex];
+        if (headerLine && headerLine.includes('\t')) {
+          newHeaders = headerLine.split('\t').map((header, index) => 
+            header.trim() || `Column ${index + 1}`
+          );
+        } else if (headerLine && headerLine.includes(',')) {
+          newHeaders = headerLine.split(',').map((header, index) => 
+            header.trim() || `Column ${index + 1}`
+          );
+        } else {
+          newHeaders = ['Column 1'];
+        }
+      } else {
+        newHeaders = ['Column 1'];
+      }
+      
+      // 更新内存中的表头
+      if (currentExcelData) {
+        currentExcelData.headers = newHeaders;
+      }
+      
+      // 发送新的表头到webview
+      if (sidebarProvider && sidebarProvider['_view']) {
+        sidebarProvider['_view'].webview.postMessage({
+          type: 'updateHeaders',
+          headers: newHeaders
+        });
+      }
+      
+      console.log(`[Extension] 表首行变化，更新表头:`, newHeaders);
+      
+      // 重新获取当前行的数据并更新表单
+      const activeEditor = vscode.window.activeTextEditor;
+      if (activeEditor && activeEditor.document.fileName === currentExcelFile) {
+        console.log(`[Extension] 表首行变化后重新获取当前行数据`);
+        updateCurrentLineData(activeEditor);
+      }
+    }
+  });
   
   // 注册侧边栏视图
   context.subscriptions.push(
@@ -955,10 +1057,12 @@ class ExcelSidebarProvider implements vscode.WebviewViewProvider {
   private _formData: any = {};
   private _isFormEditing: boolean = false;
   private _isExtensionActive: boolean = true;
+  private _headerRowIndex: number = 1;
   
   constructor(
     private readonly _extensionUri: vscode.Uri,
-    isExtensionActive: boolean
+    isExtensionActive: boolean,
+    private _onHeaderRowChanged?: (headerRowIndex: number) => void
   ) {
     this._isExtensionActive = isExtensionActive;
   }
@@ -1031,6 +1135,15 @@ webviewView.webview.onDidReceiveMessage(async (data: any) => {
       console.log('[Extension] 收到刷新消息');
       vscode.commands.executeCommand('excelPlugin.refresh');
       break;
+    case 'headerRowChanged':
+      console.log(`[Extension] 收到表首行变化消息: ${data.headerRowIndex}`);
+      this._headerRowIndex = data.headerRowIndex;
+      
+      // 调用回调函数通知外部
+      if (this._onHeaderRowChanged) {
+        this._onHeaderRowChanged(this._headerRowIndex);
+      }
+      break;
   }
 });
     
@@ -1055,6 +1168,14 @@ webviewView.webview.onDidReceiveMessage(async (data: any) => {
   
   public setExtensionActive(isActive: boolean) {
     this._isExtensionActive = isActive;
+  }
+  
+  public getHeaderRowIndex(): number {
+    return this._headerRowIndex;
+  }
+  
+  public setHeaderRowIndex(index: number) {
+    this._headerRowIndex = index;
   }
   
   public refresh() {
@@ -1248,6 +1369,11 @@ webviewView.webview.onDidReceiveMessage(async (data: any) => {
         
         <div class="main-content" id="mainContent">
           <div class="form-container" id="formContainer" style="display: none;">
+            <div class="header-row-selector">
+              <label for="headerRowInput">表首行:</label>
+              <input type="number" id="headerRowInput" min="1" class="header-row-input">
+              <span class="header-row-hint">选择表格的表头行（1-<span id="totalRowCount">总行数</span>）</span>
+            </div>
             <div class="form-scroll-container" id="formScrollContainer">
               <div id="formFields"></div>
             </div>
