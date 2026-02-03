@@ -1,0 +1,348 @@
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.ExcelSidebarProvider = void 0;
+const vscode = __importStar(require("vscode"));
+const HtmlTemplateLoader_1 = require("./utils/HtmlTemplateLoader");
+class ExcelSidebarProvider {
+    _viewId;
+    _extensionContext;
+    _view;
+    _extensionUri;
+    _disposables = [];
+    _templateLoader;
+    _formTemplateLoaded = false;
+    _pendingDataMessage = null;
+    constructor(_viewId, _extensionContext) {
+        this._viewId = _viewId;
+        this._extensionContext = _extensionContext;
+        this._extensionUri = _extensionContext.extensionUri;
+        this._templateLoader = new HtmlTemplateLoader_1.HtmlTemplateLoader(this._extensionUri, {
+            enableLogging: false, // 禁用日志输出以提高性能
+            cacheSize: 50, // 合理的缓存大小
+            enableCache: true // 启用缓存以提高性能
+        });
+    }
+    resolveWebviewView(webviewView) {
+        this._view = webviewView;
+        webviewView.webview.options = {
+            enableScripts: true,
+            localResourceRoots: [
+                this._extensionUri,
+                vscode.Uri.joinPath(this._extensionUri, 'webview')
+            ]
+        };
+        console.log('[ExcelSidebarProvider] Webview options:', {
+            enableScripts: true,
+            localResourceRoots: [
+                this._extensionUri.fsPath,
+                vscode.Uri.joinPath(this._extensionUri, 'webview').fsPath
+            ]
+        });
+        const html = this._getHtmlForWebview(webviewView.webview);
+        console.log('[ExcelSidebarProvider] 设置 webview HTML');
+        webviewView.webview.html = html;
+        console.log('[ExcelSidebarProvider] webview HTML 已设置');
+        webviewView.onDidChangeVisibility(() => {
+            console.log('[ExcelSidebarProvider] Webview 可见性变化:', webviewView.visible);
+            if (webviewView.visible && this._view) {
+                console.log('[ExcelSidebarProvider] Webview 可见，重新设置 HTML');
+                const newHtml = this._getHtmlForWebview(this._view.webview);
+                this._view.webview.html = newHtml;
+                this._view.webview.postMessage({ type: 'refresh' });
+            }
+        });
+        webviewView.webview.onDidReceiveMessage(data => {
+            console.log('[ExcelSidebarProvider] 收到消息:', data);
+            this._handleMessage(data);
+        });
+        setTimeout(() => {
+            console.log('[ExcelSidebarProvider] 延迟加载表单模板');
+            this._loadFormTemplate(webviewView.webview);
+        }, 100);
+    }
+    _loadFormTemplate(webview) {
+        try {
+            console.log('[ExcelSidebarProvider] 开始加载表单模板');
+            const formTemplate = this._templateLoader.loadFormTemplate();
+            console.log('[ExcelSidebarProvider] 表单模板加载完成，准备发送消息');
+            webview.postMessage({
+                type: 'loadFormTemplate',
+                formTemplate: formTemplate
+            });
+            this._formTemplateLoaded = true;
+            console.log('[ExcelSidebarProvider] 表单模板已加载');
+            if (this._pendingDataMessage) {
+                console.log('[ExcelSidebarProvider] 发送待处理的数据消息');
+                this.postMessage(this._pendingDataMessage);
+                this._pendingDataMessage = null;
+            }
+        }
+        catch (error) {
+            console.error('Failed to load form template:', error);
+        }
+    }
+    _handleMessage(message) {
+        try {
+            switch (message.type) {
+                case 'openExcel':
+                    vscode.commands.executeCommand('excelPlugin.openExcel');
+                    break;
+                case 'addRow':
+                    vscode.commands.executeCommand('excelPlugin.addRow', message.rowData, message.copyCurrentRow);
+                    break;
+                case 'updateCell':
+                    vscode.commands.executeCommand('excelPlugin.updateCell', message.lineNumber, message.column, message.value, message.columnIndex || 0);
+                    break;
+                case 'headerRowChanged':
+                    vscode.commands.executeCommand('excelPlugin.headerRowChanged', message.headerRowIndex);
+                    break;
+                case 'currentRowChanged':
+                    vscode.commands.executeCommand('excelPlugin.currentRowChanged', message.currentRowValue);
+                    break;
+                case 'requestCurrentRowData':
+                    // 处理前端请求当前行数据的消息
+                    console.log('[ExcelSidebarProvider] 收到请求当前行数据的消息:', message.currentLine);
+                    // 触发编辑器变更事件，获取当前行数据
+                    vscode.commands.executeCommand('excelPlugin.updateCurrentLineData');
+                    break;
+            }
+        }
+        catch (error) {
+            console.error('[ExcelSidebarProvider] _handleMessage 错误:', error);
+        }
+    }
+    postMessage(message) {
+        try {
+            if (!this._view || !this._view.webview) {
+                console.warn('[ExcelSidebarProvider] Webview 不可用，消息未发送:', message.type);
+                return;
+            }
+            console.log('[ExcelSidebarProvider] 发送消息:', message.type, message);
+            this._view.webview.postMessage(message);
+        }
+        catch (error) {
+            console.error('[ExcelSidebarProvider] postMessage 错误:', error);
+        }
+    }
+    setData(data, filePath, headerRowIndex) {
+        // 获取当前编辑器的光标位置
+        let currentLine = 0;
+        const editor = vscode.window.activeTextEditor;
+        // 计算总行数，优先使用编辑器的实际行数（包括空行）
+        let totalLines = 0;
+        if (editor && editor.document.fileName === filePath) {
+            currentLine = editor.selection.active.line + 1;
+            // 使用编辑器的实际行数，包括所有行，包括空行
+            totalLines = editor.document.lineCount;
+        }
+        else if (data.totalLines) {
+            // 如果没有编辑器，使用data中的总行数
+            totalLines = data.totalLines;
+        }
+        else if (data.rows?.length) {
+            // 如果都没有，使用数据行数
+            totalLines = data.rows.length;
+        }
+        // 验证表头行值
+        let validatedHeaderRowIndex = 1; // 默认表头行为第1行
+        if (headerRowIndex !== undefined) {
+            // 使用传入的表头行值
+            validatedHeaderRowIndex = headerRowIndex;
+        }
+        else if (data.headerRowIndex) {
+            // 使用data中的表头行值
+            validatedHeaderRowIndex = data.headerRowIndex;
+        }
+        // 确保表头行值不小于1
+        validatedHeaderRowIndex = Math.max(1, validatedHeaderRowIndex);
+        // 确保表头行值不大于总行数
+        validatedHeaderRowIndex = Math.min(validatedHeaderRowIndex, totalLines);
+        const message = {
+            type: 'data',
+            headers: data.headers || [],
+            firstRowHeaders: data.firstRowHeaders || [],
+            currentFile: filePath,
+            rowCount: data.rows?.length || 0,
+            totalColumns: data.totalColumns || 0,
+            totalLines: totalLines,
+            currentLine: currentLine,
+            headerRowIndex: validatedHeaderRowIndex,
+            isExtensionActive: true
+        };
+        if (this._formTemplateLoaded) {
+            console.log('[ExcelSidebarProvider] 表单模板已加载，直接发送数据消息');
+            this.postMessage(message);
+        }
+        else {
+            console.log('[ExcelSidebarProvider] 表单模板未加载，保存数据消息');
+            this._pendingDataMessage = message;
+        }
+    }
+    clearData() {
+        this.postMessage({
+            type: 'emptyData',
+            isExtensionActive: true
+        });
+    }
+    selectRow(rowData, rowIndex, lineNumber) {
+        if (!this._view || !this._view.webview) {
+            console.warn('[ExcelSidebarProvider] Webview 不可用，无法发送 selectRow 消息');
+            return;
+        }
+        this.postMessage({
+            type: 'selectRow',
+            rowData: rowData,
+            rowIndex: rowIndex,
+            lineNumber: lineNumber
+        });
+    }
+    clearForm() {
+        if (!this._view || !this._view.webview) {
+            console.warn('[ExcelSidebarProvider] Webview 不可用，无法发送 clearForm 消息');
+            return;
+        }
+        this.postMessage({
+            type: 'clearForm'
+        });
+    }
+    updateHeaders(headers) {
+        this.postMessage({
+            type: 'updateHeaders',
+            headers: headers
+        });
+    }
+    updateLineStats(totalLines, currentLine) {
+        this.postMessage({
+            type: 'updateLineStats',
+            totalLines: totalLines,
+            currentLine: currentLine
+        });
+    }
+    updateCurrentRowInput(currentLineNumber) {
+        this.postMessage({
+            type: 'updateCurrentRowInput',
+            currentLineNumber: currentLineNumber
+        });
+    }
+    refresh() {
+        if (this._view) {
+            this._view.webview.html = this._getHtmlForWebview(this._view.webview);
+        }
+    }
+    _getHtmlForWebview(webview) {
+        console.log('[ExcelSidebarProvider] 开始生成 HTML');
+        const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'webview', 'sidebar.js'));
+        const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'webview', 'sidebar.css'));
+        const nonce = this._templateLoader.generateNonce();
+        console.log('[ExcelSidebarProvider] Webview URI:', {
+            extensionUri: this._extensionUri.fsPath,
+            scriptUri: scriptUri.toString(),
+            styleUri: styleUri.toString(),
+            scriptUriScheme: scriptUri.scheme,
+            styleUriScheme: styleUri.scheme,
+            webviewCspSource: webview.cspSource
+        });
+        const scriptUriStr = scriptUri.toString();
+        const styleUriStr = styleUri.toString();
+        console.log('[ExcelSidebarProvider] scriptUri 原始值:', scriptUriStr);
+        console.log('[ExcelSidebarProvider] styleUri 原始值:', styleUriStr);
+        console.log('[ExcelSidebarProvider] scriptUri 长度:', scriptUriStr.length);
+        console.log('[ExcelSidebarProvider] styleUri 长度:', styleUriStr.length);
+        console.log('[ExcelSidebarProvider] scriptUri 前10字符:', scriptUriStr.substring(0, 10));
+        console.log('[ExcelSidebarProvider] styleUri 前10字符:', styleUriStr.substring(0, 10));
+        console.log('[ExcelSidebarProvider] scriptUri 第1个字符编码:', scriptUriStr.charCodeAt(0));
+        console.log('[ExcelSidebarProvider] styleUri 第1个字符编码:', styleUriStr.charCodeAt(0));
+        console.log('[ExcelSidebarProvider] scriptUri 前5个字符编码:', Array.from(scriptUriStr.substring(0, 5)).map(c => c.charCodeAt(0)));
+        console.log('[ExcelSidebarProvider] styleUri 前5个字符编码:', Array.from(styleUriStr.substring(0, 5)).map(c => c.charCodeAt(0)));
+        console.log('[ExcelSidebarProvider] scriptUri 是否包含反引号:', scriptUriStr.includes('`'));
+        console.log('[ExcelSidebarProvider] styleUri 是否包含反引号:', styleUriStr.includes('`'));
+        let cspSource = webview.cspSource;
+        console.log('[ExcelSidebarProvider] CSP_SOURCE 原始值:', cspSource);
+        console.log('[ExcelSidebarProvider] CSP_SOURCE 是否包含反引号:', cspSource.includes('`'));
+        if (cspSource.includes('`')) {
+            cspSource = cspSource.replace(/`/g, '');
+            console.log('[ExcelSidebarProvider] CSP_SOURCE 已清理反引号:', cspSource);
+        }
+        const variables = {
+            STYLE_URI: styleUriStr,
+            SCRIPT_URI: scriptUriStr,
+            NONCE: nonce,
+            CSP_SOURCE: cspSource
+        };
+        try {
+            console.log('[ExcelSidebarProvider] 开始加载模板');
+            const html = this._templateLoader.loadTemplate('sidebar.html', variables);
+            console.log('[ExcelSidebarProvider] HTML 长度:', html.length);
+            console.log('[ExcelSidebarProvider] HTML 预览 (前500字符):', html.substring(0, 500));
+            const styleUriMatch = html.match(/href="([^"]*)"/);
+            const scriptUriMatch = html.match(/src="([^"]*)"/);
+            console.log('[ExcelSidebarProvider] href 属性:', styleUriMatch ? styleUriMatch[0] : '未找到');
+            console.log('[ExcelSidebarProvider] src 属性:', scriptUriMatch ? scriptUriMatch[0] : '未找到');
+            if (styleUriMatch && styleUriMatch[1]) {
+                console.log('[ExcelSidebarProvider] href 值:', styleUriMatch[1]);
+                console.log('[ExcelSidebarProvider] href 值长度:', styleUriMatch[1].length);
+                console.log('[ExcelSidebarProvider] href 值前10字符:', styleUriMatch[1].substring(0, 10));
+                console.log('[ExcelSidebarProvider] href 值第1个字符编码:', styleUriMatch[1].charCodeAt(0));
+                console.log('[ExcelSidebarProvider] href 值是否包含反引号:', styleUriMatch[1].includes('`'));
+            }
+            if (scriptUriMatch && scriptUriMatch[1]) {
+                console.log('[ExcelSidebarProvider] src 值:', scriptUriMatch[1]);
+                console.log('[ExcelSidebarProvider] src 值长度:', scriptUriMatch[1].length);
+                console.log('[ExcelSidebarProvider] src 值前10字符:', scriptUriMatch[1].substring(0, 10));
+                console.log('[ExcelSidebarProvider] src 值第1个字符编码:', scriptUriMatch[1].charCodeAt(0));
+                console.log('[ExcelSidebarProvider] src 值是否包含反引号:', scriptUriMatch[1].includes('`'));
+            }
+            const hasTemplateStyleUri = html.includes('{{STYLE_URI}}');
+            const hasTemplateScriptUri = html.includes('{{SCRIPT_URI}}');
+            console.log('[ExcelSidebarProvider] 是否包含模板变量 STYLE_URI:', hasTemplateStyleUri);
+            console.log('[ExcelSidebarProvider] 是否包含模板变量 SCRIPT_URI:', hasTemplateScriptUri);
+            if (hasTemplateStyleUri || hasTemplateScriptUri) {
+                console.error('[ExcelSidebarProvider] 警告：HTML 中仍然包含模板变量！');
+            }
+            return html;
+        }
+        catch (error) {
+            console.error('Failed to read sidebar.html template:', error);
+            return this._templateLoader.loadFallbackTemplate(webview);
+        }
+    }
+    dispose() {
+        this._disposables.forEach(d => d.dispose());
+        this._disposables = [];
+    }
+}
+exports.ExcelSidebarProvider = ExcelSidebarProvider;
+//# sourceMappingURL=ExcelSidebarProvider.js.map

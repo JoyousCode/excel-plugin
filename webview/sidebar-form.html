@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Excel表单模板</title>
+  <link rel="stylesheet" href="sidebar.css">
+</head>
+<body>
+  <div class="form-wrapper" id="formWrapper" style="display: none;">
+    <div class="row-selectors-container">
+      <div class="row-selector-item">
+        <label for="headerRowInput">表头行:</label>
+        <input type="number" id="headerRowInput" class="row-selector-input" min="1" value="1">
+      </div>
+      
+      <div class="row-selector-item">
+        <label for="currentRowInput">当前行:</label>
+        <input type="number" id="currentRowInput" class="row-selector-input" min="1" value="1">
+      </div>
+    </div>
+    
+    <div class="form-container">
+      <div class="form-scroll-container">
+        <div id="formFields"></div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

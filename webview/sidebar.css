@@ -15,6 +15,8 @@ body {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  margin: 0;
+  padding: 0;
 }
 
 .container {
@@ -200,20 +202,93 @@ body {
 }
 
 /* 表单容器 - 填满空间 */
+/* 已移至上方统一设置 */
+
+/* 表单包装器 */
+.form-wrapper {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* 确保表单容器正确设置 */
 .form-container {
   flex: 1;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   min-height: 0;
-  position: relative;
-  height: 100%;
-  margin-top: 10px;
-  padding-bottom: 0;
-  margin-bottom: 0;
 }
 
-/* 表首行选择器样式 */
+/* 修复滚动容器 */
+.form-scroll-container {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 12px;
+  min-height: 0;
+  box-sizing: border-box;
+  max-height: none;
+  height: auto;
+}
+
+/* 行选择器容器 - 水平排列，空间不够时垂直排列 */
+.row-selectors-container {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background-color: var(--vscode-editorWidget-background);
+  border-bottom: 1px solid var(--vscode-panel-border);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+/* 单个行选择器项 */
+.row-selector-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.row-selector-item label {
+  color: var(--vscode-foreground);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* 行选择器输入框统一样式 */
+.row-selector-input {
+  width: 60px;
+  padding: 4px 8px;
+  background-color: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border);
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: 'Consolas', 'Monaco', monospace;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.row-selector-input:focus {
+  outline: none;
+  border-color: var(--vscode-focusBorder);
+  box-shadow: 0 0 0 2px rgba(97, 97, 255, 0.2);
+}
+
+.row-selector-input:hover {
+  border-color: var(--vscode-inputOption-hoverBorder);
+}
+
+/* 表首行选择器样式 - 保留向后兼容 */
 .header-row-selector {
   display: flex;
   align-items: center;
@@ -262,18 +337,47 @@ body {
   text-overflow: ellipsis;
 }
 
-/* 表单滚动容器 - 去除空白，紧贴底部 */
-.form-scroll-container {
-  flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: 12px 12px 0 12px; /* 顶部有内边距，底部为0 */
-  min-height: 0;
-  position: relative;
-  box-sizing: border-box;
-  height: calc(100vh - 180px); /* 动态计算高度 */
-  max-height: calc(100% - 40px);
+/* 当前行选择器样式 - 保留向后兼容 */
+.current-row-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background-color: var(--vscode-editorWidget-background);
+  border-bottom: 1px solid var(--vscode-panel-border);
+  flex-shrink: 0;
 }
+
+.current-row-selector label {
+  color: var(--vscode-foreground);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.current-row-input {
+  width: 60px;
+  padding: 4px 8px;
+  background-color: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border);
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: 'Consolas', 'Monaco', monospace;
+  text-align: center;
+}
+
+.current-row-input:focus {
+  outline: none;
+  border-color: var(--vscode-focusBorder);
+  box-shadow: 0 0 0 2px rgba(97, 97, 255, 0.2);
+}
+
+.current-row-input:hover {
+  border-color: var(--vscode-inputOption-hoverBorder);
+}
+
+/* 表单滚动容器样式已移至上方 */
 
 .form-scroll-container::-webkit-scrollbar {
   width: 8px;
@@ -335,8 +439,8 @@ body {
 /* 输入框样式 */
 .form-textarea {
   width: 100%;
-  min-height: 60px;
-  max-height: 120px;
+  min-height: 60px; /* 约3行 */
+  max-height: 120px; /* 约6行 */
   padding: 6px 8px;
   background-color: var(--vscode-input-background);
   color: var(--vscode-input-foreground);
@@ -345,7 +449,7 @@ body {
   font-size: 12px;
   font-family: var(--vscode-font-family);
   line-height: 1.4;
-  resize: vertical;
+  resize: none; /* 禁用手动调整大小，使用自动调整 */
   overflow-y: auto;
   overflow-x: hidden;
   white-space: pre-wrap;
@@ -523,6 +627,16 @@ body {
     gap: 4px;
   }
   
+  .row-selectors-container {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  
+  .row-selector-item {
+    justify-content: space-between;
+  }
+  
   .form-scroll-container {
     padding: 8px 8px 0 8px;
   }
@@ -535,5 +649,26 @@ body {
     min-height: 50px;
     padding: 4px 6px;
     font-size: 11px;
+  }
+}
+
+/* 窄屏幕时行选择器垂直排列 */
+@media (max-width: 250px) {
+  .row-selectors-container {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+  
+  .row-selector-item {
+    justify-content: space-between;
+  }
+  
+  .row-selector-item label {
+    flex: 1;
+  }
+  
+  .row-selector-input {
+    width: 70px;
   }
 }

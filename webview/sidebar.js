@@ -1,8 +1,11 @@
 (function() {
-  const vscode = acquireVsCodeApi();
+  let vscode = null;
   let headers = [];
+  let firstRowHeaders = [];
   let currentFile = '';
   let rowCount = 0;
+  let totalColumns = 0;
+  let totalLines = 0;
   let currentRowIndex = -1;
   let currentLineNumber = 0;
   let isEditing = false;
@@ -15,127 +18,492 @@
   let isRenderingForm = false;
   let headerRowIndex = 1;
   let headerRowInputInitialized = false;
+  let currentRowInputValue = 1;
+  let currentRowInputInitialized = false;
+  let isUpdatingFromVSCodeForCurrentRow = false;
+  let isFormRendered = false;
+  let pendingSelectRowData = null;
+  
+  // 初始化智能抖动系统
+  let smartDebouncer = null;
+  
+  // 加载智能抖动系统
+  function loadSmartDebouncer() {
+    try {
+      // 检查是否已经在全局作用域中定义
+      if (typeof window.SmartDebouncer === 'function') {
+        smartDebouncer = new window.SmartDebouncer();
+        console.log('[Sidebar] 智能抖动系统已加载');
+      } else {
+        console.warn('[Sidebar] 智能抖动系统未加载，使用默认防抖');
+        // 降级到简单防抖
+        smartDebouncer = {
+          registerField: () => {},
+          unregisterField: () => {},
+          debounce: (field, value, callback) => {
+            setTimeout(callback, 300);
+          },
+          clear: () => {},
+          dispose: () => {}
+        };
+      }
+    } catch (error) {
+      console.error('[Sidebar] 加载智能抖动系统时出错:', error);
+      // 降级到简单防抖
+      smartDebouncer = {
+        registerField: () => {},
+        unregisterField: () => {},
+        debounce: (field, value, callback) => {
+          setTimeout(callback, 300);
+        },
+        clear: () => {},
+        dispose: () => {}
+      };
+    }
+  }
+  
+  // 加载智能抖动系统
+  loadSmartDebouncer();
+  
+  // 安全地获取 VSCode API
+  try {
+    vscode = acquireVsCodeApi();
+  } catch (error) {
+    console.error('[Sidebar] 无法获取 VSCode API:', error);
+    return;
+  }
+  
+  if (!vscode) {
+    console.error('[Sidebar] VSCode API 不可用');
+    return;
+  }
+  
+  console.log('[Sidebar] 脚本已加载，VSCode API 可用');
   
   // 初始化
   window.addEventListener('message', event => {
-    const message = event.data;
-    
-    switch (message.type) {
-      case 'data':
-        handleData(message);
-        break;
-      case 'emptyData':
-        handleEmptyData(message);
-        break;
-      case 'selectRow':
-        selectRow(message.rowData, message.rowIndex, message.lineNumber);
-        break;
-      case 'clearForm':
-        clearForm();
-        break;
-      case 'requestFormData':
-        sendFormData();
-        break;
-      case 'updateHeaders':
-        console.log('[Sidebar] 收到更新表头消息:', message.headers);
-        updateHeadersOnly(message.headers);
-        break;
+    console.log('[Sidebar] 收到消息:', event.data.type, event.data);
+    console.log('[Sidebar] 消息详情:', JSON.stringify(event.data));
+    console.log('[Sidebar] 当前状态:', {
+      isExtensionActive,
+      isFormRendered,
+      isRenderingForm,
+      isEditing,
+      currentLineNumber,
+      headersLength: headers.length
+    });
+    try {
+      const message = event.data;
+      
+      switch (message.type) {
+        case 'data':
+          handleData(message);
+          break;
+        case 'emptyData':
+          handleEmptyData(message);
+          break;
+        case 'selectRow':
+          selectRow(message.rowData, message.rowIndex, message.lineNumber);
+          break;
+        case 'clearForm':
+          clearForm();
+          break;
+        case 'requestFormData':
+          sendFormData();
+          break;
+        case 'updateHeaders':
+          console.log('[Sidebar] 收到更新表头消息:', message.headers);
+          updateHeadersOnly(message.headers);
+          break;
+        case 'refresh':
+          console.log('[Sidebar] 收到刷新消息');
+          break;
+        case 'loadFormTemplate':
+          loadFormTemplate(message.formTemplate);
+          break;
+        case 'updateCurrentRowInput':
+          updateCurrentRowInput(message.currentLineNumber);
+          break;
+        case 'headerRowChanged':
+          console.log('[Sidebar] 收到表头行变化消息:', message.headerRowIndex);
+          if (message.headerRowIndex) {
+            headerRowIndex = message.headerRowIndex;
+            const headerRowInput = document.getElementById('headerRowInput');
+            if (headerRowInput) {
+              headerRowInput.value = message.headerRowIndex;
+            }
+            updateUI();
+            // 重新渲染表单，使用新的表头行数据
+            renderForm();
+          }
+          break;
+        case 'editorChange':
+          console.log('[Sidebar] 收到编辑器变化消息:', {
+            totalLines: message.totalLines,
+            totalColumns: message.totalColumns,
+            cursorRowIndex: message.cursorRowIndex
+          });
+          // 更新总列数和总行数
+          if (message.totalColumns !== undefined) {
+            totalColumns = message.totalColumns;
+          }
+          if (message.totalLines !== undefined) {
+            totalLines = message.totalLines;
+          }
+          // 更新当前行
+          if (message.cursorRowIndex !== undefined) {
+            currentLineNumber = message.cursorRowIndex;
+            currentRowInputValue = message.cursorRowIndex;
+          }
+          // 更新UI和表头行选择器的最大值
+          updateUI();
+          updateHeaderRowSelectorMax();
+          updateCurrentRowSelectorMax();
+          break;
+      }
+    } catch (error) {
+      console.error('[Sidebar] 处理消息时出错:', error);
     }
   });
+  
+  // 加载表单模板
+  function loadFormTemplate(formTemplate) {
+    const formPlaceholder = document.getElementById('formPlaceholder');
+    if (formPlaceholder && formTemplate) {
+      // 设置 formPlaceholder 样式以支持 flex 布局
+      formPlaceholder.style.display = 'flex';
+      formPlaceholder.style.flexDirection = 'column';
+      formPlaceholder.style.height = '100%';
+      formPlaceholder.style.width = '100%';
+      
+      formPlaceholder.innerHTML = formTemplate;
+      console.log('[Sidebar] 表单模板加载完成');
+      
+      // 确保 formWrapper 有正确的样式
+      const formWrapper = document.getElementById('formWrapper');
+      if (formWrapper) {
+        formWrapper.style.display = 'flex';
+        formWrapper.style.flexDirection = 'column';
+        formWrapper.style.height = '100%';
+        formWrapper.style.width = '100%';
+        formWrapper.style.overflow = 'hidden';
+        console.log('[Sidebar] 表单包装器样式已设置');
+      }
+      
+      // 模板加载后，如果有数据，立即渲染表单
+      if (headers.length > 0 && isExtensionActive && currentFile) {
+        console.log('[Sidebar] 模板加载后立即渲染表单');
+        renderForm();
+        
+        // 渲染完成后，如果有待处理的 selectRow 数据，处理它
+        setTimeout(() => {
+          if (pendingSelectRowData && isFormRendered) {
+            console.log('[Sidebar] 处理待处理的 selectRow 数据');
+            selectRow(
+              pendingSelectRowData.rowData,
+              pendingSelectRowData.rowIndex,
+              pendingSelectRowData.lineNumber
+            );
+            pendingSelectRowData = null;
+          }
+        }, 60);
+      }
+    }
+  }
   
   // 初始化表首行选择器
   function initHeaderRowSelector() {
     const headerRowInput = document.getElementById('headerRowInput');
     if (headerRowInput && !headerRowInputInitialized) {
-      // 设置初始值
       headerRowInput.value = headerRowIndex;
       
       console.log(`[Sidebar] 初始化表首行选择器: 值=${headerRowIndex}`);
       
-      // 防抖定时器
       let headerRowInputDebounceTimer = null;
       
-      // 监听输入变化 - 使用input事件实现实时渲染
       headerRowInput.addEventListener('input', function() {
         const newValue = parseInt(this.value);
         
-        // 清除之前的防抖定时器
         if (headerRowInputDebounceTimer) {
           clearTimeout(headerRowInputDebounceTimer);
         }
         
-        // 防抖处理，避免频繁触发
         headerRowInputDebounceTimer = setTimeout(() => {
-          if (!isNaN(newValue) && newValue >= 1 && newValue <= rowCount) {
-            headerRowIndex = newValue;
-            console.log(`[Sidebar] 表首行设置为: ${headerRowIndex}`);
-            // 通知扩展表首行已变化，扩展会发送updateHeaders消息回来触发renderForm
+          try {
+            // 使用totalLines作为最大值，确保表头行值不超过文件总行数
+            // totalLines已经是内存中的数据，优先使用
+            const maxHeaderRow = totalLines > 0 ? totalLines : 1;
+            if (!isNaN(newValue)) {
+              // 如果输入值大于总行数，自动更新为总行数
+              if (newValue > maxHeaderRow) {
+                headerRowIndex = maxHeaderRow;
+                console.log(`[Sidebar] 表首行值大于总行数，自动设置为: ${headerRowIndex}`);
+                // 更新输入框值
+                headerRowInput.value = headerRowIndex;
+              } else if (newValue >= 1) {
+                headerRowIndex = newValue;
+                console.log(`[Sidebar] 表首行设置为: ${headerRowIndex}`);
+              }
+              
+              // 发送表头行变化事件
+              vscode.postMessage({
+                type: 'headerRowChanged',
+                headerRowIndex: headerRowIndex
+              });
+            }
+          } catch (error) {
+            console.error('[Sidebar] headerRowInput setTimeout 错误:', error);
+          }
+        }, 50);
+      });
+      
+      // 添加失去焦点事件监听
+      headerRowInput.addEventListener('blur', function() {
+        try {
+          // 如果输入框内容为空，自动填充为第一行
+          if (this.value.trim() === '') {
+            headerRowIndex = 1;
+            this.value = headerRowIndex;
+            console.log(`[Sidebar] 表首行输入框为空，自动设置为: ${headerRowIndex}`);
+            
+            // 发送表头行变化事件
             vscode.postMessage({
               type: 'headerRowChanged',
               headerRowIndex: headerRowIndex
             });
-          } else if (!isNaN(newValue)) {
-            console.log(`[Sidebar] 无效的表首行值: ${newValue}, 有效范围: 1-${rowCount}`);
           }
-        }, 300); // 300ms防抖延迟
+        } catch (error) {
+          console.error('[Sidebar] headerRowInput blur 错误:', error);
+        }
       });
       
       headerRowInputInitialized = true;
     }
+  }
+  
+  // 初始化当前行选择器
+  function initCurrentRowSelector() {
+    const currentRowInput = document.getElementById('currentRowInput');
+    if (currentRowInput && !currentRowInputInitialized) {
+      currentRowInput.value = currentRowInputValue;
+      
+      console.log(`[Sidebar] 初始化当前行选择器: 值=${currentRowInputValue}`);
+      
+      let currentRowInputDebounceTimer = null;
+      
+      currentRowInput.addEventListener('input', function() {
+        const newValue = parseInt(this.value);
+        
+        if (currentRowInputDebounceTimer) {
+          clearTimeout(currentRowInputDebounceTimer);
+        }
+        
+        currentRowInputDebounceTimer = setTimeout(() => {
+          try {
+            if (!isUpdatingFromVSCodeForCurrentRow && !isNaN(newValue)) {
+              const maxCurrentRow = totalLines > 0 ? totalLines : 1;
+              
+              // 如果输入值大于总行数，自动更新为总行数
+              if (newValue > maxCurrentRow) {
+                currentRowInputValue = maxCurrentRow;
+                console.log(`[Sidebar] 当前行值大于总行数，自动设置为: ${currentRowInputValue}`);
+                // 更新输入框值
+                currentRowInput.value = currentRowInputValue;
+              } else if (newValue >= 1) {
+                currentRowInputValue = newValue;
+                console.log(`[Sidebar] 当前行设置为: ${currentRowInputValue}`);
+              }
+              
+              // 发送当前行变化事件
+              vscode.postMessage({
+                type: 'currentRowChanged',
+                currentRowValue: currentRowInputValue
+              });
+            } else if (!isNaN(newValue)) {
+              console.log(`[Sidebar] 无效的当前行值: ${newValue}, 有效范围: 1-${totalLines}`);
+            }
+          } catch (error) {
+            console.error('[Sidebar] currentRowInput setTimeout 错误:', error);
+          }
+        }, 50);
+      });
+      
+      // 添加失去焦点事件监听
+      currentRowInput.addEventListener('blur', function() {
+        try {
+          // 如果输入框内容为空，自动填充为第一行
+          if (this.value.trim() === '') {
+            currentRowInputValue = 1;
+            this.value = currentRowInputValue;
+            console.log(`[Sidebar] 当前行输入框为空，自动设置为: ${currentRowInputValue}`);
+            
+            // 发送当前行变化事件
+            vscode.postMessage({
+              type: 'currentRowChanged',
+              currentRowValue: currentRowInputValue
+            });
+          }
+        } catch (error) {
+          console.error('[Sidebar] currentRowInput blur 错误:', error);
+        }
+      });
+      
+      currentRowInputInitialized = true;
+    }
     
-    // 每次都更新最大值
-    updateHeaderRowSelectorMax();
+    updateCurrentRowSelectorMax();
+  }
+  
+  // 更新当前行选择器的最大值
+  function updateCurrentRowSelectorMax() {
+    const currentRowInput = document.getElementById('currentRowInput');
+    
+    if (currentRowInput) {
+      const newMax = totalLines > 0 ? totalLines : 1;
+      currentRowInput.max = newMax;
+      console.log(`[Sidebar] 更新当前行选择器最大值为: ${newMax}`);
+      
+      if (currentRowInputValue > newMax) {
+        currentRowInputValue = newMax;
+        currentRowInput.value = newMax;
+        console.log(`[Sidebar] 当前行值调整为: ${currentRowInputValue}`);
+      } else if (currentLineNumber > 0) {
+        currentRowInput.value = currentLineNumber;
+        currentRowInputValue = currentLineNumber;
+        console.log(`[Sidebar] 当前行值设置为: ${currentRowInputValue}`);
+      } else {
+        console.log(`[Sidebar] 跳过更新当前行输入框: currentLineNumber=${currentLineNumber}, currentRowInputValue=${currentRowInputValue}`);
+      }
+    } else {
+      console.log(`[Sidebar] 当前行选择器元素未找到`);
+    }
   }
   
   // 更新表首行选择器的最大值
   function updateHeaderRowSelectorMax() {
     const headerRowInput = document.getElementById('headerRowInput');
-    const totalRowCountSpan = document.getElementById('totalRowCount');
     
     if (headerRowInput) {
-      const newMax = rowCount > 0 ? rowCount : 1;
+      const newMax = totalLines > 0 ? totalLines : 1;
       headerRowInput.max = newMax;
       console.log(`[Sidebar] 更新表首行选择器最大值为: ${newMax}`);
       
-      // 更新总行数显示
-      if (totalRowCountSpan) {
-        totalRowCountSpan.textContent = newMax.toString();
-        console.log(`[Sidebar] 更新总行数显示为: ${newMax}`);
-      }
-      
-      // 如果当前值超过新的最大值，调整当前值
       if (headerRowIndex > newMax) {
         headerRowIndex = newMax;
         headerRowInput.value = newMax;
         console.log(`[Sidebar] 表首行值调整为: ${headerRowIndex}`);
+      } else {
+        console.log(`[Sidebar] 表首行值保持不变: ${headerRowIndex}`);
       }
     } else {
       console.log(`[Sidebar] 表首行选择器元素未找到`);
     }
   }
   
+  // 更新当前行输入框的值
+  function updateCurrentRowInput(newCurrentLineNumber) {
+    const currentRowInput = document.getElementById('currentRowInput');
+    if (currentRowInput) {
+      isUpdatingFromVSCodeForCurrentRow = true;
+      currentRowInput.value = newCurrentLineNumber;
+      currentRowInputValue = newCurrentLineNumber;
+      console.log(`[Sidebar] 更新当前行输入框值为: ${newCurrentLineNumber}`);
+      
+      try {
+        // 更新当前行索引
+        currentLineNumber = newCurrentLineNumber;
+        
+        // 不要重新渲染表单，因为updateCurrentLineData已经调用了selectRow更新了表单数据
+        // 重新渲染会覆盖已经更新的表单数据
+        
+        setTimeout(() => {
+          try {
+            isUpdatingFromVSCodeForCurrentRow = false;
+          } catch (error) {
+            console.error('[Sidebar] updateCurrentRowInput setTimeout 错误:', error);
+          }
+        }, 100);
+      } catch (error) {
+        console.error('[Sidebar] updateCurrentRowInput 错误:', error);
+      }
+    }
+  }
+  
   // 处理有数据的情况
   function handleData(data) {
-    console.log('[Sidebar] 接收到数据:', {
+    console.log('[Sidebar] 接收数据:', {
       表头数: data.headers?.length || 0,
       文件: data.currentFile,
       行数: data.rowCount,
-      当前行: data.currentLine
+      总行数: data.totalLines,
+      总列数: data.totalColumns,
+      当前行: data.currentLine,
+      表头行: data.headerRowIndex
     });
     
     headers = data.headers || [];
     currentFile = data.currentFile || '';
     rowCount = data.rowCount || 0;
+    totalColumns = data.totalColumns || headers.length;
+    totalLines = data.totalLines || 0;
     currentLineNumber = data.currentLine || 0;
+    currentRowInputValue = data.currentLine || 1;
     isExtensionActive = data.isExtensionActive !== false;
     
+    // 存储第一行表头用于固定占位符文本
+    if (data.firstRowHeaders && Array.isArray(data.firstRowHeaders)) {
+      firstRowHeaders = data.firstRowHeaders;
+    } else {
+      firstRowHeaders = [];
+    }
+    
+    // 使用从后端传来的表头行值
+    headerRowIndex = data.headerRowIndex || totalLines;
+    
+    // 确保表头行值不大于总行数
+    if (headerRowIndex > totalLines) {
+      headerRowIndex = totalLines;
+    }
+    
+    // 同步表头行值到输入框
+    const headerRowInput = document.getElementById('headerRowInput');
+    if (headerRowInput) {
+      headerRowInput.value = headerRowIndex;
+    }
+    
     updateUI();
+    
+    // 检查表单模板是否已加载
+    const formWrapper = document.getElementById('formWrapper');
     if (isExtensionActive && headers.length > 0 && currentFile) {
-      renderForm();
-      // 在表单渲染完成后初始化表首行选择器
-      setTimeout(() => {
-        initHeaderRowSelector();
-      }, 50);
+      if (formWrapper) {
+        console.log('[Sidebar] 表单模板已加载，渲染表单');
+        renderForm();
+        try {
+          setTimeout(() => {
+            try {
+              initHeaderRowSelector();
+              initCurrentRowSelector();
+              
+              // 如果当前行大于0，尝试获取并填充当前行数据
+              if (currentLineNumber > 0) {
+                console.log('[Sidebar] 尝试获取当前行数据:', currentLineNumber);
+                // 发送消息到后端，请求当前行数据
+                vscode.postMessage({
+                  type: 'requestCurrentRowData',
+                  currentLine: currentLineNumber
+                });
+              }
+            } catch (error) {
+              console.error('[Sidebar] handleData setTimeout 回调错误:', error);
+            }
+          }, 50);
+        } catch (error) {
+          console.error('[Sidebar] handleData setTimeout 设置错误:', error);
+        }
+      } else {
+        console.log('[Sidebar] 表单模板未加载，等待模板加载');
+      }
     } else {
       showEmptyState();
     }
@@ -160,7 +528,7 @@
   function updateUI() {
     const hasData = headers.length > 0 && isExtensionActive && currentFile;
     const emptyState = document.getElementById('emptyState');
-    const formContainer = document.getElementById('formContainer');
+    const formWrapper = document.getElementById('formWrapper');
     const fileInfo = document.getElementById('fileInfo');
     const fileStats = document.getElementById('fileStats');
     const statusIndicator = document.getElementById('statusIndicator');
@@ -168,7 +536,6 @@
     const mainContent = document.getElementById('mainContent');
     const openExcelBtn = document.getElementById('openExcelBtn');
     
-    // 更新插件状态显示
     if (isExtensionActive) {
       statusIndicator.innerHTML = `
         <span>已激活</span>
@@ -202,16 +569,16 @@
     }
     
     if (isExtensionActive && hasData) {
-      // 有Excel数据
       emptyState.style.display = 'none';
-      formContainer.style.display = 'block';
+      if (formWrapper) {
+        formWrapper.style.display = 'flex';
+      }
       mainContent.style.backgroundColor = 'transparent';
       
       if (currentFile) {
         const fileName = currentFile.split(/[\\/]/).pop();
         const filePath = currentFile;
         
-        // 文件路径显示
         fileInfo.innerHTML = `
           <div><strong>${fileName}</strong></div>
           <div class="file-path">${filePath}</div>
@@ -221,38 +588,39 @@
       }
       
       fileStats.innerHTML = `
-        <span>行: ${rowCount}</span>
-        <span>列: ${headers.length}</span>
+        <span>总行: ${totalLines}</span>
+        <span>总列: ${totalColumns}</span>
         <span class="current-line">当前: ${currentLineNumber > 0 ? currentLineNumber : '无'}</span>
       `;
 
     } else if (isExtensionActive) {
-      // 插件激活但没有Excel文件
       emptyState.style.display = 'flex';
-      formContainer.style.display = 'none';
+      if (formWrapper) {
+        formWrapper.style.display = 'none';
+      }
       mainContent.style.backgroundColor = 'var(--vscode-editorWidget-background)';
       
       fileInfo.innerHTML = '<div>未打开Excel文件</div>';
       fileStats.innerHTML = `
-        <span>行: 0</span>
-        <span>列: 0</span>
+        <span>总行: 0</span>
+        <span>总列: 0</span>
         <span class="current-line">当前: 无</span>
       `;
       
     } else {
-      // 插件未激活
       emptyState.style.display = 'flex';
-      formContainer.style.display = 'none';
+      if (formWrapper) {
+        formWrapper.style.display = 'none';
+      }
       mainContent.style.backgroundColor = 'var(--vscode-editorWidget-background)';
       
       fileInfo.innerHTML = '<div>Excel编辑器已关闭</div>';
       fileStats.innerHTML = `
-        <span>行: 0</span>
-        <span>列: 0</span>
+        <span>总行: 0</span>
+        <span>总列: 0</span>
         <span class="current-line">当前: 无</span>
       `;
       
-      // 清空表单
       clearForm();
     }
   }
@@ -260,12 +628,13 @@
   // 显示空状态
   function showEmptyState() {
     const emptyState = document.getElementById('emptyState');
-    const formContainer = document.getElementById('formContainer');
+    const formWrapper = document.getElementById('formWrapper');
     
     emptyState.style.display = 'flex';
-    formContainer.style.display = 'none';
+    if (formWrapper) {
+      formWrapper.style.display = 'none';
+    }
     
-    // 清空表单字段
     const formFields = document.getElementById('formFields');
     if (formFields) {
       formFields.innerHTML = '';
@@ -275,22 +644,21 @@
   // 仅更新表头名称，不影响输入框的值
   function updateHeadersOnly(newHeaders) {
     const formFields = document.getElementById('formFields');
-    if (!formFields) return;
+    if (!formFields) {
+      console.log('[Sidebar] formFields 不存在，表单未渲染，跳过更新表头');
+      return;
+    }
     
     console.log(`[Sidebar] 仅更新表头名称，新表头数量: ${newHeaders.length}`);
     console.log(`[Sidebar] 当前行号: ${currentLineNumber}, 表首行: ${headerRowIndex}, 当前行索引: ${currentRowIndex}`);
     
-    // 更新全局headers变量
     headers = newHeaders;
     
-    // 根据新的表首行位置重新计算currentRowIndex
     const newRowIndex = currentLineNumber - headerRowIndex;
     console.log(`[Sidebar] 根据新表首行重新计算行索引: ${newRowIndex}`);
     
-    // 更新currentRowIndex
     currentRowIndex = newRowIndex;
     
-    // 遍历现有的表单项，只更新label中的表头名称和输入框的dataset.column属性
     newHeaders.forEach((header, index) => {
       const formGroup = document.getElementById(`form-group-${index}`);
       if (formGroup) {
@@ -305,7 +673,9 @@
         const textarea = formGroup.querySelector('textarea');
         if (textarea) {
           textarea.dataset.column = header;
-          textarea.placeholder = `输入 ${header}`;
+          // 使用第一行表头作为固定占位符文本
+          let placeholderHeader = firstRowHeaders[index] || `Column ${index + 1}`;
+          textarea.placeholder = `输入 ${placeholderHeader}`;
         }
       }
     });
@@ -320,27 +690,33 @@
     
     isRenderingForm = true;
     
-    // 保存当前表单数据（使用索引而不是header名称）
     const currentFormData = {};
-    if (headers.length > 0) {
-      headers.forEach((header, index) => {
+    if (totalColumns > 0) {
+      for (let index = 0; index < totalColumns; index++) {
         const textarea = document.getElementById(`input-${index}`);
         if (textarea) {
           currentFormData[index] = textarea.value;
         }
-      });
+      }
     }
     
     formFields.innerHTML = '';
     
-    if (headers.length === 0 || !isExtensionActive) {
+    if (totalColumns === 0 || !isExtensionActive) {
       formFields.innerHTML = '<p class="hint" style="text-align: center; padding: 20px;">暂无表头数据</p>';
       return;
     }
     
-    console.log(`[Sidebar] 渲染表单，表头数量: ${headers.length}, 表首行: ${headerRowIndex}`);
+    console.log(`[Sidebar] 渲染表单，表头数量: ${headers.length}, 总列数: ${totalColumns}, 表首行: ${headerRowIndex}`);
     
-    headers.forEach((header, index) => {
+    // 使用总列数来渲染表单项
+    for (let index = 0; index < totalColumns; index++) {
+      // 获取表头名称，如果没有则使用默认名称
+      let header = headers[index] || `Column ${index + 1}`;
+      
+      // 获取第一行表头用于固定占位符文本
+      let placeholderHeader = firstRowHeaders[index] || `Column ${index + 1}`;
+      
       const formGroup = document.createElement('div');
       formGroup.className = 'form-group';
       formGroup.id = `form-group-${index}`;
@@ -355,48 +731,61 @@
       const textarea = document.createElement('textarea');
       textarea.id = `input-${index}`;
       textarea.className = 'form-textarea';
-      textarea.placeholder = `输入 ${header}`;
+      textarea.placeholder = `输入 ${placeholderHeader}`;
       textarea.dataset.column = header;
       textarea.dataset.columnIndex = index;
       textarea.rows = 3;
       
-      // 自动调整高度
       const autoResize = (element) => {
         element.style.height = 'auto';
-        const newHeight = Math.min(element.scrollHeight, 120);
-        element.style.height = newHeight + 'px';
-        element.style.overflowY = element.scrollHeight > 120 ? 'auto' : 'hidden';
+        // 估算每行的高度（约20px）
+        const lineHeight = 20;
+        const minHeight = lineHeight * 3; // 3行
+        const maxHeight = lineHeight * 6; // 6行
+        
+        // 计算实际需要的高度
+        const newHeight = Math.min(element.scrollHeight, maxHeight);
+        const finalHeight = Math.max(newHeight, minHeight);
+        
+        element.style.height = finalHeight + 'px';
+        element.style.overflowY = element.scrollHeight > maxHeight ? 'auto' : 'hidden';
       };
       
-      // 输入事件处理 - 修复：确保能触发更新
+      // 注册字段到智能抖动系统
+      smartDebouncer.registerField(header, {
+        type: index < 3 ? 'key' : 'normal',
+        priority: index < 3 ? 1 : 0
+      });
+      
       textarea.addEventListener('input', function() {
         autoResize(this);
         
         if (isUpdatingFromVSCode) {
           console.log(`[Sidebar] 跳过更新: 正在从VSCode更新`);
-          return; // 如果是来自VSCode的更新，不发送消息
+          return;
         }
         
-        // 清除之前的超时
-        if (updateTimeouts[header]) {
-          clearTimeout(updateTimeouts[header]);
+        const field = this.dataset.column;
+        const columnIndex = parseInt(this.dataset.columnIndex) || 0;
+        const textareaElement = this;
+        
+        // 清除之前的定时器
+        if (textareaElement.debounceTimer) {
+          clearTimeout(textareaElement.debounceTimer);
         }
         
-        // 设置新的超时，防抖动处理
-        updateTimeouts[header] = setTimeout(() => {
-          const now = Date.now();
-          if (now - lastUpdateTime < 100) { // 避免过于频繁
-            return;
+        // 设置新的定时器，使用简单的防抖
+        textareaElement.debounceTimer = setTimeout(() => {
+          try {
+            const latestValue = textareaElement.value;
+            console.log(`[Sidebar] 从表单更新单元格: 行号${currentLineNumber}, 列"${field}", 列索引${columnIndex}, 值: "${latestValue}"`);
+            updateCell(currentLineNumber, field, latestValue, columnIndex);
+          } catch (error) {
+            console.error('[Sidebar] 防抖更新错误:', error);
           }
-          lastUpdateTime = now;
-          
-          // 更新对应单元格
-          console.log(`[Sidebar] 从表单更新单元格: 行${currentRowIndex}, 列"${header}", 值: "${this.value}"`);
-          updateCell(currentRowIndex, header, this.value);
-        }, 200);
+        }, 300);
       });
       
-      // 绑定焦点事件
       textarea.addEventListener('focus', () => {
         isEditing = true;
         console.log('[Sidebar] 开始编辑表单');
@@ -405,43 +794,80 @@
         });
       });
       
-      // 绑定失去焦点事件
       textarea.addEventListener('blur', () => {
-        // 清除所有未完成的更新
         Object.keys(updateTimeouts).forEach(key => {
           clearTimeout(updateTimeouts[key]);
         });
         
-        setTimeout(() => {
-          isEditing = false;
-          console.log('[Sidebar] 结束编辑表单');
-          vscode.postMessage({
-            type: 'endEditing'
-          });
-        }, 200);
+        try {
+          setTimeout(() => {
+            try {
+              isEditing = false;
+              console.log('[Sidebar] 结束编辑表单');
+              vscode.postMessage({
+                type: 'endEditing'
+              });
+            } catch (error) {
+              console.error('[Sidebar] textarea blur setTimeout 回调错误:', error);
+            }
+          }, 50);
+        } catch (error) {
+          console.error('[Sidebar] textarea blur setTimeout 设置错误:', error);
+        }
       });
       
       formGroup.appendChild(label);
       formGroup.appendChild(textarea);
       formFields.appendChild(formGroup);
-    });
+    }
     
-    // 表单渲染完成，恢复数据
-    setTimeout(() => {
-      isRenderingForm = false;
-      
-      // 恢复之前保存的数据（使用索引而不是header名称）
-      if (Object.keys(currentFormData).length > 0) {
-        headers.forEach((header, index) => {
-          const textarea = document.getElementById(`input-${index}`);
-          if (textarea && currentFormData[index] !== undefined) {
-            textarea.value = currentFormData[index];
-            autoResize(textarea);
+    try {
+      setTimeout(() => {
+        try {
+          isRenderingForm = false;
+          isFormRendered = true;
+          
+          if (Object.keys(currentFormData).length > 0) {
+            for (let index = 0; index < totalColumns; index++) {
+              const textarea = document.getElementById(`input-${index}`);
+              if (textarea && currentFormData[index] !== undefined) {
+                textarea.value = currentFormData[index];
+                const autoResize = (element) => {
+                  element.style.height = 'auto';
+                  // 估算每行的高度（约20px）
+                  const lineHeight = 20;
+                  const minHeight = lineHeight * 3; // 3行
+                  const maxHeight = lineHeight * 6; // 6行
+                  
+                  // 计算实际需要的高度
+                  const newHeight = Math.min(element.scrollHeight, maxHeight);
+                  const finalHeight = Math.max(newHeight, minHeight);
+                  
+                  element.style.height = finalHeight + 'px';
+                  element.style.overflowY = element.scrollHeight > maxHeight ? 'auto' : 'hidden';
+                };
+                autoResize(textarea);
+              }
+            }
+            console.log('[Sidebar] 表单渲染完成，已恢复数据');
           }
-        });
-        console.log('[Sidebar] 表单渲染完成，已恢复数据');
-      }
-    }, 10);
+          
+          if (pendingSelectRowData) {
+            console.log('[Sidebar] 处理待处理的 selectRow 数据');
+            selectRow(
+              pendingSelectRowData.rowData,
+              pendingSelectRowData.rowIndex,
+              pendingSelectRowData.lineNumber
+            );
+            pendingSelectRowData = null;
+          }
+        } catch (error) {
+          console.error('[Sidebar] renderForm setTimeout 回调错误:', error);
+        }
+      }, 10);
+    } catch (error) {
+      console.error('[Sidebar] renderForm setTimeout 设置错误:', error);
+    }
   }
   
   // 获取Excel列字母
@@ -459,68 +885,170 @@
   
   // 选择行（填充表单）
   function selectRow(rowData, rowIndex, lineNumber) {
-    if (isEditing || !isExtensionActive) {
-      console.log(`[Sidebar] 跳过选择行: isEditing=${isEditing}, isExtensionActive=${isExtensionActive}`);
+    console.log(`[Sidebar] selectRow 被调用`, {
+      isExtensionActive,
+      isFormRendered,
+      isRenderingForm,
+      isEditing,
+      lineNumber,
+      rowIndex,
+      headersLength: headers.length,
+      totalColumns: totalColumns,
+      rowData,
+      rowDataKeys: Object.keys(rowData),
+      headers: headers
+    });
+
+    if (!isExtensionActive) {
+      console.log(`[Sidebar] 跳过选择行: isExtensionActive=${isExtensionActive}`);
       return;
     }
     
-    // 如果表单正在渲染，延迟执行selectRow
+    if (!isFormRendered) {
+      console.log(`[Sidebar] 表单未渲染，保存待处理数据`);
+      pendingSelectRowData = { rowData, rowIndex, lineNumber };
+      return;
+    }
+    
     if (isRenderingForm) {
       console.log(`[Sidebar] 表单正在渲染，延迟执行selectRow`);
-      setTimeout(() => {
-        selectRow(rowData, rowIndex, lineNumber);
-      }, 50);
+      try {
+        setTimeout(() => {
+          try {
+            selectRow(rowData, rowIndex, lineNumber);
+          } catch (error) {
+            console.error('[Sidebar] selectRow setTimeout 回调错误:', error);
+          }
+        }, 50);
+      } catch (error) {
+        console.error('[Sidebar] selectRow setTimeout 设置错误:', error);
+      }
+      return;
+    }
+    
+    if (isEditing && lineNumber === currentLineNumber) {
+      console.log(`[Sidebar] 跳过选择行: 正在编辑同一行 ${lineNumber}`);
       return;
     }
     
     console.log(`[Sidebar] 选择行: 行索引${rowIndex}, 行号${lineNumber}, 数据:`, rowData);
     
-    currentRowIndex = rowIndex;
-    currentLineNumber = lineNumber;
-    formData = { ...rowData };
-    
-    // 更新文件统计信息
-    updateUI();
-    
-    // 更新表首行选择器的最大值
-    updateHeaderRowSelectorMax();
-    
-    // 清除所有未完成的更新
-    Object.keys(updateTimeouts).forEach(key => {
-      clearTimeout(updateTimeouts[key]);
-    });
-    
-    // 标记为来自VSCode的更新
-    isUpdatingFromVSCode = true;
-    
-    // 填充表单
-    headers.forEach((header, index) => {
-      const textarea = document.getElementById(`input-${index}`);
-      if (textarea) {
-        const value = rowData[header] || '';
-        console.log(`[Sidebar] 填充字段 ${header}: "${value}"`);
+    try {
+      currentRowIndex = rowIndex;
+      currentLineNumber = lineNumber;
+      currentRowInputValue = lineNumber;
+      formData = { ...rowData };
+      
+      const currentRowInput = document.getElementById('currentRowInput');
+      if (currentRowInput) {
+        currentRowInput.value = lineNumber;
+        console.log(`[Sidebar] 直接更新当前行输入框值为: ${lineNumber}`);
+      }
+      
+      updateUI();
+      updateHeaderRowSelectorMax();
+      updateCurrentRowSelectorMax();
+      
+      Object.keys(updateTimeouts).forEach(key => {
+        clearTimeout(updateTimeouts[key]);
+      });
+      
+      isUpdatingFromVSCode = true;
+      
+      console.log(`[Sidebar] 开始填充表单，总列数: ${totalColumns}`);
+      
+      const formFields = document.getElementById('formFields');
+      if (!formFields) {
+        console.warn('[Sidebar] formFields 元素不存在，表单可能未渲染');
+        return;
+      }
+      
+      const firstTextarea = document.getElementById('input-0');
+      if (!firstTextarea) {
+        console.warn('[Sidebar] 表单元素不存在，尝试重新渲染表单');
+        renderForm();
+        setTimeout(() => {
+          selectRow(rowData, rowIndex, lineNumber);
+        }, 100);
+        return;
+      }
+      
+      // 转换rowData为数组，按照表头顺序排列
+      const rowValues = [];
+      for (let i = 0; i < totalColumns; i++) {
+        // 尝试获取对应的值
+        let value = '';
+        const header = headers[i] || `Column ${i + 1}`;
         
-        // 只有当值不同时才更新，避免触发input事件
-        if (textarea.value !== value) {
+        // 先尝试使用表头获取值
+        if (rowData[header] !== undefined) {
+          value = rowData[header];
+        } else {
+          // 尝试使用索引获取值
+          const keys = Object.keys(rowData);
+          if (keys[i]) {
+            value = rowData[keys[i]];
+          }
+        }
+        
+        rowValues.push(value || '');
+      }
+      
+      console.log(`[Sidebar] 准备填充的数据:`, rowValues);
+      
+      // 遍历所有表单元素，直接从上往下填充数据
+      for (let i = 0; i < totalColumns; i++) {
+        const textarea = document.getElementById(`input-${i}`);
+        console.log(`[Sidebar] 查找元素 input-${i}, 结果:`, textarea ? '找到' : '未找到');
+        
+        if (textarea && i < rowValues.length) {
+          const value = rowValues[i] || '';
+          console.log(`[Sidebar] 填充表单元素 ${i}: "${value}"`);
+          
+          // 直接更新表单元素的值
           textarea.value = value;
           
-          // 触发自动调整高度
-          textarea.dispatchEvent(new Event('input'));
-          
-          // 设置title以便鼠标悬停时显示完整内容
+          // 更新title属性
           if (value.length > 50) {
             textarea.title = value;
           } else {
             textarea.title = '';
           }
+          
+          // 自动调整输入框大小
+          const autoResize = (element) => {
+            element.style.height = 'auto';
+            // 估算每行的高度（约20px）
+            const lineHeight = 20;
+            const minHeight = lineHeight * 3; // 3行
+            const maxHeight = lineHeight * 6; // 6行
+            
+            // 计算实际需要的高度
+            const newHeight = Math.min(element.scrollHeight, maxHeight);
+            const finalHeight = Math.max(newHeight, minHeight);
+            
+            element.style.height = finalHeight + 'px';
+            element.style.overflowY = element.scrollHeight > maxHeight ? 'auto' : 'hidden';
+          };
+          autoResize(textarea);
         }
       }
-    });
-    
-    // 重置标志
-    setTimeout(() => {
-      isUpdatingFromVSCode = false;
-    }, 100);
+      
+      try {
+        setTimeout(() => {
+          try {
+            isUpdatingFromVSCode = false;
+            console.log('[Sidebar] 选择行完成');
+          } catch (error) {
+            console.error('[Sidebar] selectRow setTimeout 回调错误:', error);
+          }
+        }, 100);
+      } catch (error) {
+        console.error('[Sidebar] selectRow setTimeout 设置错误:', error);
+      }
+    } catch (error) {
+      console.error('[Sidebar] selectRow 错误:', error);
+    }
   }
   
   // 清空表单
@@ -532,16 +1060,12 @@
     isEditing = false;
     formData = {};
     
-    // 更新文件统计信息
     updateUI();
-    
-    // 更新表首行选择器的最大值
     updateHeaderRowSelectorMax();
+    updateCurrentRowSelectorMax();
     
-    // 标记为来自VSCode的更新
     isUpdatingFromVSCode = true;
     
-    // 清空所有输入框
     headers.forEach((header, index) => {
       const textarea = document.getElementById(`input-${index}`);
       if (textarea) {
@@ -549,12 +1073,21 @@
         textarea.title = '';
         textarea.style.height = 'auto';
       }
+      // 从智能抖动系统中移除字段
+      smartDebouncer.unregisterField(header);
     });
     
-    // 重置标志
-    setTimeout(() => {
-      isUpdatingFromVSCode = false;
-    }, 100);
+    try {
+      setTimeout(() => {
+        try {
+          isUpdatingFromVSCode = false;
+        } catch (error) {
+          console.error('[Sidebar] clearForm setTimeout 回调错误:', error);
+        }
+      }, 100);
+    } catch (error) {
+      console.error('[Sidebar] clearForm setTimeout 设置错误:', error);
+    }
   }
   
   // 添加新行
@@ -571,28 +1104,10 @@
       return;
     }
     
-    const rowData = {};
-    let hasData = false;
-    
-    headers.forEach((header, index) => {
-      const textarea = document.getElementById(`input-${index}`);
-      if (textarea) {
-        rowData[header] = textarea.value;
-        if (textarea.value.trim() !== '') {
-          hasData = true;
-        }
-      }
-    });
-    
-    if (!hasData) {
-      console.log('[Sidebar] 请输入至少一个字段的值');
-      return;
-    }
-    
-    console.log('[Sidebar] 添加新行:', rowData);
+    console.log('[Sidebar] 添加新行: 复制当前行数据到最后一行');
     vscode.postMessage({
       type: 'addRow',
-      rowData: rowData
+      copyCurrentRow: true
     });
   };
   
@@ -604,12 +1119,11 @@
   };
   
   // 更新单元格
-  function updateCell(rowIndex, column, value) {
-    console.log(`[Sidebar] 发送更新单元格消息: 行${rowIndex}, 列"${column}", 值: "${value}"`);
+  function updateCell(lineNumber, column, value, columnIndex) {
+    console.log(`[Sidebar] 发送更新单元格消息: 行号${lineNumber}, 列"${column}", 列索引${columnIndex}, 值: "${value}"`);
     
-    // 验证数据
-    if (rowIndex === undefined || rowIndex === null) {
-      console.error(`[Sidebar] 无效的行索引: ${rowIndex}`);
+    if (lineNumber === undefined || lineNumber === null) {
+      console.error(`[Sidebar] 无效的行号: ${lineNumber}`);
       return;
     }
     
@@ -618,11 +1132,28 @@
       return;
     }
     
+    // 检查是否正在编辑表头行
+    if (lineNumber === headerRowIndex) {
+      console.log(`[Sidebar] 正在编辑表头行，需要更新表头`);
+      // 触发表头更新
+      setTimeout(() => {
+        try {
+          vscode.postMessage({
+            type: 'headerRowChanged',
+            headerRowIndex: headerRowIndex
+          });
+        } catch (error) {
+          console.error('[Sidebar] 触发表头更新错误:', error);
+        }
+      }, 100);
+    }
+    
     vscode.postMessage({
       type: 'updateCell',
-      rowIndex: rowIndex,
+      lineNumber: lineNumber,
       column: column,
-      value: value || ''  // 确保值不是undefined
+      columnIndex: columnIndex,
+      value: value || ''
     });
   }
   
@@ -643,7 +1174,63 @@
   }
   
   // 初始加载
-  setTimeout(() => {
-    console.log('[Sidebar] 初始化完成');
-  }, 100);
+  try {
+    setTimeout(() => {
+      try {
+        console.log('[Sidebar] 初始化完成');
+        
+        const openExcelBtn = document.getElementById('openExcelBtn');
+        if (openExcelBtn) {
+          openExcelBtn.addEventListener('click', () => {
+            try {
+              vscode.postMessage({
+                type: 'openExcel'
+              });
+            } catch (error) {
+              console.error('[Sidebar] 打开Excel按钮点击错误:', error);
+            }
+          });
+        }
+        
+        const addRowBtn = document.getElementById('addRowBtn');
+        if (addRowBtn) {
+          addRowBtn.addEventListener('click', () => {
+            try {
+              window.addRow();
+            } catch (error) {
+              console.error('[Sidebar] 添加行按钮点击错误:', error);
+            }
+          });
+        }
+        
+        const saveExcelBtn = document.getElementById('saveExcelBtn');
+        if (saveExcelBtn) {
+          saveExcelBtn.addEventListener('click', () => {
+            try {
+              window.saveExcel();
+            } catch (error) {
+              console.error('[Sidebar] 保存Excel按钮点击错误:', error);
+            }
+          });
+        }
+        
+        const closeExcelBtn = document.getElementById('closeExcelBtn');
+        if (closeExcelBtn) {
+          closeExcelBtn.addEventListener('click', () => {
+            try {
+              window.closeExcel();
+            } catch (error) {
+              console.error('[Sidebar] 关闭Excel按钮点击错误:', error);
+            }
+          });
+        }
+        
+        console.log('[Sidebar] 按钮事件监听器已设置');
+      } catch (error) {
+        console.error('[Sidebar] 初始加载 setTimeout 回调错误:', error);
+      }
+    }, 100);
+  } catch (error) {
+    console.error('[Sidebar] 初始加载 setTimeout 设置错误:', error);
+  }
 })();

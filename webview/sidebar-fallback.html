@@ -3,16 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{CSP_SOURCE}} 'unsafe-inline'; script-src 'nonce-{{NONCE}}';">
   <title>Excel编辑器</title>
   <link rel="stylesheet" href="{{STYLE_URI}}">
 </head>
 <body>
-  <script>
-    console.log('[Sidebar HTML] 页面开始加载 - 内联脚本');
-    console.log('[Sidebar HTML] 脚本URI:', '{{SCRIPT_URI}}');
-    console.log('[Sidebar HTML] 样式URI:', '{{STYLE_URI}}');
-  </script>
-  
   <div class="container">
     <div class="header-section">
       <div class="header-top">
@@ -34,10 +29,20 @@
         <span>总列: 0</span>
         <span>当前行: 无</span>
       </div>
+
+      <div class="header-row-selector">
+        <label for="headerRowInput">表头行:</label>
+        <input type="number" id="headerRowInput" class="header-row-input" min="1" value="1">
+        <span class="header-row-hint">共 <span id="totalRowCount">1</span> 行</span>
+      </div>
     </div>
     
     <div class="main-content" id="mainContent">
-      <div id="formPlaceholder"></div>
+      <div class="form-container" id="formContainer" style="display: none;">
+        <div class="form-scroll-container">
+          <div id="formFields"></div>
+        </div>
+      </div>
       
       <div class="empty-state" id="emptyState">
         <div class="empty-icon">📊</div>
@@ -56,10 +61,16 @@
     </div>
   </div>
   
-  <script>
-    console.log('[Sidebar HTML] 页面开始加载');
+  <script nonce="{{NONCE}}">
+    const vscode = acquireVsCodeApi();
+    
+    document.getElementById('openExcelBtn').addEventListener('click', () => {
+      vscode.postMessage({ type: 'openExcel' });
+    });
+    
+    document.getElementById('addRowBtn').addEventListener('click', () => {
+      vscode.postMessage({ type: 'addRow', rowData: {} });
+    });
   </script>
-  <script src="smart-debouncer.js"></script>
-  <script src="{{SCRIPT_URI}}"></script>
 </body>
 </html>

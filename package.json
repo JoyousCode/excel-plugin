@@ -2,7 +2,7 @@
   "name": "excel-plugin",
   "displayName": "ExcelPlugin",
   "description": "Excel文件编辑器 - 支持在VS Code中编辑Excel文件，双向绑定表单与编辑器",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "publisher": "zhaoxuandong",
   "engines": {
     "vscode": "^1.107.0"
@@ -18,14 +18,13 @@
     "onCommand:excelPlugin.openExcel",
     "onCommand:excelPlugin.addRow",
     "onCommand:excelPlugin.updateCell",
-    "onCommand:excelPlugin.refresh",
+    "onCommand:excelPlugin.headerRowChanged",
+    "onCommand:excelPlugin.currentRowChanged",
     "onCommand:excelPlugin.activate",
     "onCommand:excelPlugin.deactivate",
-    "onCommand:excelPlugin.startEditing",
-    "onCommand:excelPlugin.endEditing",
     "onLanguage:plaintext"
   ],
-  "main": "./out/extension.js",
+  "main": "./out/ExcelExtension.js",
   "contributes": {
     "viewsContainers": {
       "activitybar": [
@@ -68,8 +67,13 @@
         "category": "ExcelPlugin"
       },
       {
-        "command": "excelPlugin.refresh",
-        "title": "刷新表单",
+        "command": "excelPlugin.headerRowChanged",
+        "title": "表首行变化",
+        "category": "ExcelPlugin"
+      },
+      {
+        "command": "excelPlugin.currentRowChanged",
+        "title": "当前行变化",
         "category": "ExcelPlugin"
       },
       {
@@ -91,16 +95,6 @@
         "command": "excelPlugin.deactivate",
         "title": "关闭Excel编辑器",
         "category": "ExcelPlugin"
-      },
-      {
-        "command": "excelPlugin.startEditing",
-        "title": "开始编辑表单",
-        "category": "ExcelPlugin"
-      },
-      {
-        "command": "excelPlugin.endEditing",
-        "title": "结束编辑表单",
-        "category": "ExcelPlugin"
       }
     ],
     "keybindings": [
@@ -119,10 +113,40 @@
           "default": true,
           "description": "是否在打开Excel文件时自动加载"
         },
-        "excelPlugin.autoSync": {
+        "excelPlugin.sync.headerToForm": {
           "type": "boolean",
           "default": true,
-          "description": "是否启用双向同步"
+          "description": "同步1：表首行值修改 → 实时同步渲染表单项（表头）"
+        },
+        "excelPlugin.sync.editorToForm.lessThan": {
+          "type": "boolean",
+          "default": true,
+          "description": "同步3：表首行值 < 光标所在行值 → 编辑器 ↔ 表单项双向同步"
+        },
+        "excelPlugin.sync.editorToForm.equal": {
+          "type": "boolean",
+          "default": true,
+          "description": "同步4：表首行值 = 光标所在行值 → 编辑器 ↔ 表单项双向同步"
+        },
+        "excelPlugin.sync.editorToForm.greaterThan": {
+          "type": "boolean",
+          "default": true,
+          "description": "同步5：表首行值 > 光标所在行值 → 编辑器 ↔ 表单项双向同步"
+        },
+        "excelPlugin.sync.formToHeader": {
+          "type": "boolean",
+          "default": true,
+          "description": "同步6：表首行值 = 光标所在行值 → 表单项修改 → 同步到表头"
+        },
+        "excelPlugin.sync.cursorRowToCurrentRowInput": {
+          "type": "boolean",
+          "default": true,
+          "description": "同步2：光标所在行变动 → 实时同步到当前行输入框"
+        },
+        "excelPlugin.sync.currentRowInputToCursor": {
+          "type": "boolean",
+          "default": true,
+          "description": "同步2：当前行输入框值变化 → 实时同步光标位置（移到行首）"
         }
       }
     },
