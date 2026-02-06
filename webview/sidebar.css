@@ -288,7 +288,7 @@ body {
   border-color: var(--vscode-inputOption-hoverBorder);
 }
 
-/* 表首行选择器样式 - 保留向后兼容 */
+/* 表头行选择器样式 - 保留向后兼容 */
 .header-row-selector {
   display: flex;
   align-items: center;

@@ -21,7 +21,7 @@ export class EditorToFormSyncHandler_LessThan extends BaseSyncHandler {
     }
 
     const editorEvent = event as EditorChangeEvent;
-    this.log('处理编辑器变更事件（表首行 < 光标行）', {
+    this.log('处理编辑器变更事件（表头行 < 光标行）', {
       headerRowIndex: editorEvent.headerRowIndex,
       cursorRowIndex: editorEvent.cursorRowIndex
     });
@@ -77,7 +77,7 @@ export class EditorToFormSyncHandler_LessThan extends BaseSyncHandler {
       return;
     }
 
-    this.log('处理表单变更事件（表首行 < 光标行）', {
+    this.log('处理表单变更事件（表头行 < 光标行）', {
       column: event.column,
       value: event.value,
       rowIndex: event.rowIndex

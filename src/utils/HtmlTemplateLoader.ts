@@ -171,7 +171,7 @@ export class HtmlTemplateLoader {
       <div class="form-wrapper" id="formWrapper" style="display: none;">
         <div class="row-selectors-container">
           <div class="row-selector-item">
-            <label for="headerRowInput">表首行:</label>
+            <label for="headerRowInput">表头行:</label>
             <input type="number" id="headerRowInput" class="row-selector-input" min="1" value="1">
           </div>
           

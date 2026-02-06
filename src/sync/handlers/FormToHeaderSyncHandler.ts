@@ -21,7 +21,7 @@ export class FormToHeaderSyncHandler extends BaseSyncHandler {
     }
 
     const formEvent = event as FormChangeEvent;
-    this.log('处理表单变更事件（表首行 = 光标行，同步到表头）', {
+    this.log('处理表单变更事件（表头行 = 光标行，同步到表头）', {
       column: formEvent.column,
       value: formEvent.value,
       headerRowIndex: formEvent.headerRowIndex,
@@ -51,7 +51,7 @@ export class FormToHeaderSyncHandler extends BaseSyncHandler {
     const headerLine = event.headerRowIndex - 1;
     
     if (headerLine < 0 || headerLine >= editor.document.lineCount) {
-      this.logError('无效的表首行', { headerLine, lineCount: editor.document.lineCount });
+      this.logError('无效的表头行', { headerLine, lineCount: editor.document.lineCount });
       return;
     }
 

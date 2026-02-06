@@ -17,7 +17,7 @@ export class HeaderToFormSyncHandler extends BaseSyncHandler {
     }
 
     const headerEvent = event as HeaderChangeEvent;
-    this.log('处理表首行变更事件', {
+    this.log('处理表头行变更事件', {
       headers: headerEvent.headers,
       headerRowIndex: headerEvent.headerRowIndex
     });

@@ -224,13 +224,13 @@
     }
   }
   
-  // 初始化表首行选择器
+  // 初始化表头行选择器
   function initHeaderRowSelector() {
     const headerRowInput = document.getElementById('headerRowInput');
     if (headerRowInput && !headerRowInputInitialized) {
       headerRowInput.value = headerRowIndex;
       
-      console.log(`[Sidebar] 初始化表首行选择器: 值=${headerRowIndex}`);
+      console.log(`[Sidebar] 初始化表头行选择器: 值=${headerRowIndex}`);
       
       let headerRowInputDebounceTimer = null;
       
@@ -250,12 +250,12 @@
               // 如果输入值大于总行数，自动更新为总行数
               if (newValue > maxHeaderRow) {
                 headerRowIndex = maxHeaderRow;
-                console.log(`[Sidebar] 表首行值大于总行数，自动设置为: ${headerRowIndex}`);
+                console.log(`[Sidebar] 表头行值大于总行数，自动设置为: ${headerRowIndex}`);
                 // 更新输入框值
                 headerRowInput.value = headerRowIndex;
               } else if (newValue >= 1) {
                 headerRowIndex = newValue;
-                console.log(`[Sidebar] 表首行设置为: ${headerRowIndex}`);
+                console.log(`[Sidebar] 表头行设置为: ${headerRowIndex}`);
               }
               
               // 发送表头行变化事件
@@ -277,7 +277,7 @@
           if (this.value.trim() === '') {
             headerRowIndex = 1;
             this.value = headerRowIndex;
-            console.log(`[Sidebar] 表首行输入框为空，自动设置为: ${headerRowIndex}`);
+            console.log(`[Sidebar] 表头行输入框为空，自动设置为: ${headerRowIndex}`);
             
             // 发送表头行变化事件
             vscode.postMessage({
@@ -392,24 +392,24 @@
     }
   }
   
-  // 更新表首行选择器的最大值
+  // 更新表头行选择器的最大值
   function updateHeaderRowSelectorMax() {
     const headerRowInput = document.getElementById('headerRowInput');
     
     if (headerRowInput) {
       const newMax = totalLines > 0 ? totalLines : 1;
       headerRowInput.max = newMax;
-      console.log(`[Sidebar] 更新表首行选择器最大值为: ${newMax}`);
+      console.log(`[Sidebar] 更新表头行选择器最大值为: ${newMax}`);
       
       if (headerRowIndex > newMax) {
         headerRowIndex = newMax;
         headerRowInput.value = newMax;
-        console.log(`[Sidebar] 表首行值调整为: ${headerRowIndex}`);
+        console.log(`[Sidebar] 表头行值调整为: ${headerRowIndex}`);
       } else {
-        console.log(`[Sidebar] 表首行值保持不变: ${headerRowIndex}`);
+        console.log(`[Sidebar] 表头行值保持不变: ${headerRowIndex}`);
       }
     } else {
-      console.log(`[Sidebar] 表首行选择器元素未找到`);
+      console.log(`[Sidebar] 表头行选择器元素未找到`);
     }
   }
   
@@ -673,12 +673,12 @@
     }
     
     console.log(`[Sidebar] 仅更新表头名称，新表头数量: ${newHeaders.length}`);
-    console.log(`[Sidebar] 当前行号: ${currentLineNumber}, 表首行: ${headerRowIndex}, 当前行索引: ${currentRowIndex}`);
+    console.log(`[Sidebar] 当前行号: ${currentLineNumber}, 表头行: ${headerRowIndex}, 当前行索引: ${currentRowIndex}`);
     
     headers = newHeaders;
     
     const newRowIndex = currentLineNumber - headerRowIndex;
-    console.log(`[Sidebar] 根据新表首行重新计算行索引: ${newRowIndex}`);
+    console.log(`[Sidebar] 根据新表头行重新计算行索引: ${newRowIndex}`);
     
     currentRowIndex = newRowIndex;
     
@@ -730,7 +730,7 @@
       return;
     }
     
-    console.log(`[Sidebar] 渲染表单，表头数量: ${headers.length}, 总列数: ${totalColumns}, 表首行: ${headerRowIndex}`);
+    console.log(`[Sidebar] 渲染表单，表头数量: ${headers.length}, 总列数: ${totalColumns}, 表头行: ${headerRowIndex}`);
     
     // 使用总列数来渲染表单项
     for (let index = 0; index < totalColumns; index++) {

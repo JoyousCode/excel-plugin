@@ -68,7 +68,7 @@
       },
       {
         "command": "excelPlugin.headerRowChanged",
-        "title": "表首行变化",
+        "title": "表头行变化",
         "category": "ExcelPlugin"
       },
       {
@@ -173,6 +173,6 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/2095596768/excel-plugin.git"
+    "url": "https://github.com/JoyousCode/excel-plugin.git"
   }
 }
