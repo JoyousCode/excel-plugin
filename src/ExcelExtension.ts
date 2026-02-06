@@ -511,97 +511,60 @@ export function activate(context: vscode.ExtensionContext) {
         const selectedLines = Math.abs(selection.end.line - selection.start.line) + 1;
 
         if (hasSelection && selectedLines > 1) {
-          sidebarProvider.clearForm();
-          return;
-        }
-
-        // 优先使用内存中的总行数，否则使用编辑器的行数
-        let totalLines = currentExcelData?.totalLines || editor.document.lineCount;
-        
-        const lines: string[] = [];
-        for (let i = 0; i < editor.document.lineCount; i++) {
-          lines.push(editor.document.lineAt(i).text);
-        }
-
-        if (lines.length === 0) {
           sidebarProvider.selectRow({}, -1, cursorRowIndex);
           return;
         }
 
-        // 确保表头行值不大于总行数
-        if (headerRowIndex > totalLines) {
-          headerRowIndex = Math.min(headerRowIndex, totalLines);
-          if (headerRowIndex < 1) {
-            headerRowIndex = 1;
-          }
-        }
+        // 优先使用内存中的总行数，否则使用编辑器的行数
+        const totalLines = currentExcelData?.totalLines || editor.document.lineCount;
+        
+        // 发送行数统计信息到前端
+        sidebarProvider.updateLineStats(totalLines, cursorRowIndex);
 
-        // 使用表头行作为表头
-        const headerLineIndex = headerRowIndex - 1;
-        const headerLine = lines[headerLineIndex] || lines[0];
-        let headers: string[] = [];
+        // 获取当前行文本
+        const currentLineText = editor.document.lineAt(cursorPosition.line).text;
+        let cells: string[] = [];
 
-        if (headerLine && headerLine.includes('\t')) {
-          headers = headerLine.split('\t').map((header, index) => {
-            // 移除表头中的引号
-            const trimmedHeader = header.trim().replace(/^"|"$/g, '').replace(/""/g, '"');
-            return trimmedHeader || `Column ${index + 1}`;
-          });
-        } else if (headerLine && headerLine.includes(',')) {
-          headers = headerLine.split(',').map((header, index) => {
-            // 移除表头中的引号
-            const trimmedHeader = header.trim().replace(/^"|"$/g, '').replace(/""/g, '"');
-            return trimmedHeader || `Column ${index + 1}`;
-          });
+        if (currentLineText.includes('\t')) {
+          cells = currentLineText.split('\t');
+        } else if (currentLineText.includes(',')) {
+          cells = currentLineText.split(',');
         } else {
-          headers = ['Column 1'];
+          cells = [currentLineText];
         }
 
-        if (!Array.isArray(headers) || headers.length === 0) {
-          headers = ['Column 1'];
+        // 使用内存中的表头数据
+        const headers = currentExcelData?.headers || [];
+        
+        // 根据列索引直接构造数据对象
+        const rowObject: any = {};
+        // 使用总列数来遍历，确保所有列都能被处理
+        const totalColumns = currentExcelData?.totalColumns || headers.length || 1;
+        for (let i = 0; i < totalColumns; i++) {
+          const header = i < headers.length ? headers[i] : `Column ${i + 1}`;
+          rowObject[header] = i < cells.length ? cells[i].trim() : '';
         }
 
-        // 更新当前Excel数据的表头
-        if (currentExcelData) {
-          currentExcelData.headers = headers;
+        console.log(`[ExcelExtension] updateCurrentLineData: 准备发送数据`, {
+          cursorRowIndex,
+          cells,
+          rowObject
+        });
+
+        // 计算行索引
+        let rowIndex = -1;
+        if (headerRowIndex > 0) {
+          rowIndex = cursorRowIndex - headerRowIndex;
         }
 
-        // 发送更新后的表头到前端
-        sidebarProvider.updateHeaders(headers);
-        sidebarProvider.updateLineStats(editor.document.lineCount, cursorRowIndex);
+        // 发送当前行数据到前端
+        sidebarProvider.selectRow(rowObject, rowIndex, cursorRowIndex);
 
-        if (cursorPosition.line >= 0 && cursorPosition.line < lines.length) {
-          const currentLineText = lines[cursorPosition.line];
-          let cells: string[] = [];
-
-          if (currentLineText.includes('\t')) {
-            cells = currentLineText.split('\t');
-          } else if (currentLineText.includes(',')) {
-            cells = currentLineText.split(',');
-          } else {
-            cells = [currentLineText];
-          }
-
-          // 根据列索引直接构造数据对象
-          const rowObject: any = {};
-          // 使用总列数来遍历，确保所有列都能被处理
-          const totalColumns = currentExcelData?.totalColumns || headers.length;
-          for (let i = 0; i < totalColumns; i++) {
-            const header = i < headers.length ? headers[i] : `Column ${i + 1}`;
-            rowObject[header] = i < cells.length ? cells[i].trim() : '';
-          }
-
-          console.log(`[ExcelExtension] updateCurrentLineData: 准备发送数据`, {
-            cursorRowIndex,
-            headers,
-            cells,
-            rowObject
-          });
-
-          sidebarProvider.selectRow(rowObject, cursorPosition.line, cursorRowIndex);
-        }
       } catch (error) {
         console.error('[ExcelExtension] updateCurrentLineData 错误:', error);
+        const cursorPosition = editor.selection.active;
+        const cursorRowIndex = cursorPosition.line + 1;
+        sidebarProvider.selectRow({}, -1, cursorRowIndex);
       }
     };
 
@@ -1085,9 +1048,15 @@ export function activate(context: vscode.ExtensionContext) {
             syncManager.refreshConfig();
           }
           if (event.affectsConfiguration('excelPlugin.activateOnStart')) {
-            const newActivateOnStart = config.get<boolean>('activateOnStart', true);
-            if (newActivateOnStart !== isExtensionActive) {
-              console.log(`[ExcelExtension] 配置变更，更新激活状态: ${isExtensionActive} → ${newActivateOnStart}`);
+            // 在函数内部获取最新的配置，确保获取到更新后的值
+            const latestConfig = vscode.workspace.getConfiguration('excelPlugin');
+            const newActivateOnStart = latestConfig.get<boolean>('activateOnStart', true);
+            console.log(`[ExcelExtension] 配置变更，activateOnStart: ${newActivateOnStart}`);
+            console.log(`[ExcelExtension] 当前激活状态: ${isExtensionActive}`);
+            
+            // 直接更新激活状态为配置值
+            if (isExtensionActive !== newActivateOnStart) {
+              console.log(`[ExcelExtension] 更新激活状态: ${isExtensionActive} → ${newActivateOnStart}`);
               isExtensionActive = newActivateOnStart;
               updateStatusBar();
               sidebarProvider.updateStatus(isExtensionActive);
@@ -1098,6 +1067,8 @@ export function activate(context: vscode.ExtensionContext) {
                 // 如果切换到未激活状态，清空表单
                 sidebarProvider.clearForm();
               }
+            } else {
+              console.log(`[ExcelExtension] 激活状态未变化，跳过更新`);
             }
           }
         } catch (error) {

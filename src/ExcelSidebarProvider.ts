@@ -162,8 +162,24 @@ export class ExcelSidebarProvider {
       
       // 如果从非激活状态切换到激活状态，加载表单模板
       if (!wasActive && isActive && this._view && this._view.webview) {
-        console.log('[ExcelSidebarProvider] 从非激活状态切换到激活状态，加载表单模板');
-        this._loadFormTemplate(this._view.webview);
+        // 检查当前激活的编辑器是否是 Excel 文件
+        const editor = vscode.window.activeTextEditor;
+        const isExcelFile = editor && editor.document && editor.document.fileName && 
+          ['.xlsx', '.xls', '.xlsm', '.xlsb'].includes(editor.document.fileName.toLowerCase().substring(editor.document.fileName.lastIndexOf('.')));
+        
+        console.log('[ExcelSidebarProvider] 从非激活状态切换到激活状态，检查编辑器:', {
+          hasEditor: !!editor,
+          isExcelFile: isExcelFile,
+          fileName: editor?.document?.fileName
+        });
+        
+        // 只有当当前激活的编辑器是 Excel 文件时，才加载表单模板
+        if (isExcelFile) {
+          console.log('[ExcelSidebarProvider] 从非激活状态切换到激活状态，加载表单模板');
+          this._loadFormTemplate(this._view.webview);
+        } else {
+          console.log('[ExcelSidebarProvider] 从非激活状态切换到激活状态，但当前编辑器不是 Excel 文件，跳过加载表单模板');
+        }
       }
     } catch (error) {
       console.error('[ExcelSidebarProvider] updateStatus 错误:', error);

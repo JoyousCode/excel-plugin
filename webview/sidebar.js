@@ -175,6 +175,10 @@
   function loadFormTemplate(formTemplate) {
     const formPlaceholder = document.getElementById('formPlaceholder');
     if (formPlaceholder && formTemplate) {
+      // 重置初始化标志，确保重新初始化事件监听器
+      headerRowInputInitialized = false;
+      currentRowInputInitialized = false;
+      
       // 设置 formPlaceholder 样式以支持 flex 布局
       formPlaceholder.style.display = 'flex';
       formPlaceholder.style.flexDirection = 'column';
@@ -194,6 +198,10 @@
         formWrapper.style.overflow = 'hidden';
         console.log('[Sidebar] 表单包装器样式已设置');
       }
+      
+      // 重新初始化表头行选择器和当前行选择器的事件监听器
+      initHeaderRowSelector();
+      initCurrentRowSelector();
       
       // 模板加载后，如果有数据，立即渲染表单
       if (headers.length > 0 && isExtensionActive && currentFile) {
